@@ -58,3 +58,33 @@ if __name__ == "__main__":
     (OUTPUT_FOLDER / f"moodle_grades.csv").write_text(course.get_grades())
 ```
 
+## Usage: publishing a static site to a "File" resource
+
+Moodle can host a static site (e.g. a rendered Quarto book) by unzipping a
+zip into a "File" resource's file area -- Moodle auto-detects `index.html`
+as the resource's main file, and relative links to the other files resolve
+via `pluginfile.php`. This re-does that "delete old files -> upload zip ->
+unzip -> delete zip -> save" sequence from a script instead of by hand:
+
+``` python
+from roodle import connect_via_firefox
+
+course = connect_via_firefox("https://moodle.bath.ac.uk", 12345)
+course.replace_resource_files(
+    cmid=1594533,        # course module id, from the edit-settings URL
+    zip_path="_site.zip",
+    ctx_id=3165614,       # the module's context id
+    repo_id=3,            # id of the "Upload a file" repository instance
+    maxbytes=52428800,    # course's max upload size, in bytes
+)
+```
+
+`ctx_id`, `repo_id` and `maxbytes` are stable for a given module/course but
+aren't easily discoverable from the page itself; find them once from a
+browser network capture (devtools -> Network -> do the upload by hand ->
+look at the `repository_ajax.php?action=upload` and `...action=list`
+requests) and hard-code them alongside the course/module ids. This also
+works for a "Folder" resource, since it uses the same `files` field and
+edit-form machinery.
+
+
