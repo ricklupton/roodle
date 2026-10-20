@@ -1,18 +1,27 @@
 [project]
 name = "roodle"
-version = "0.1.0"
-description = "Moodle tools"
+version = "0.2.0"
+description = "Script a Moodle course through a logged-in Firefox session"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
-    "beautifulsoup4~=4.12",
+    "beautifulsoup4>=4.12",
+    "browser-cookie3>=0.19.1",
+    "httpx>=0.27",
     "lxml>=5.3.0",
-    "browser-cookie3==0.19.1",
-    "pandas>=2.2.2",
-    "pyparsing~=3.1",
-    "requests>=2.32.3",
 ]
+
+[project.scripts]
+roodle = "roodle.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# bs4's lxml builder passes an option newer lxml deprecates; not ours.
+filterwarnings = ["ignore:The 'strip_cdata' option:DeprecationWarning"]

@@ -1,90 +1,130 @@
 # roodle
 
-Moodle VLE client
+Script a Moodle course from Python, or publish built files to it from the
+command line.
 
-This library borrows an already logged-in Firefox session, and uses it to access the Moodle site, which is easier than trying to figure out how to do SSO log-in.
+Logging in to a university Moodle usually goes through single sign-on, which
+is hard to script. roodle borrows the cookies of a Firefox window that is
+already logged in instead, and makes the same requests as Moodle's own pages.
 
-## Usage: assigning groups
+## Publishing built files: `roodle publish`
 
-Example of updating Moodle groups to match those listed in a CSV file:
+A `moodle.toml` says which course, and which built files go to it:
 
-``` python
-import pandas as pd
-from roodle import connect_via_firefox
+``` toml
+server = "https://moodle.bath.ac.uk"
+course = 12345
 
-course = connect_via_firefox("https://moodle.bath.ac.uk", 12345)
-course.fetch_users()
+# Built files, each published to the File resource that holds a file of the
+# same name.  To make a resource, drag the built file onto the course page.
+publish_files = [
+  "_build/slides/*.html",
+  "_build/slides/*.pdf",
+  "_build/sheets/*.pdf",
+]
 
-df = pd.read_csv("group_assignments.csv", index_col="Username")
-assigned_groups = df["Group"].to_dict()
-group_counts = df.groupby("Group")["Group"].count().to_dict()
-
-SD_groups = [g['value'] for g in course.groups if g['value'].startswith("SD-")] + ["Solo groups"]
-
-for k, group in assigned_groups.items():
-    # print(k, group)
-    new_groups = [group]
-    if group_counts.get(group) == 1:
-        new_groups += ["Solo groups"]
-    course.modify_user_groups(k, remove=SD_groups, add=new_groups)
+# One path each: a directory (zipped, then unzipped into the resource), which
+# needs a cmid, or a single file, with an optional cmid to pin it.
+[[publish]]
+path = "_build/book"
+cmid = 1594533       # the number in the resource's edit-settings URL
 ```
 
-You might use groups for multiple purposes, so the example does not remove all groups - just those starting with a given prefix (`SD-101`, `SD-102`, etc).
+Paths are relative to the config file. Then:
 
-## Usage: downloading assignment data
-
-This example downloads the "marking spreadsheet" from a Moodle assignment in CSV format.  The result is the same as going to the website and downloading it manually, but more convenient.
-
-``` python
-from pathlib import Path
-import pandas as pd
-from roodle import connect_via_firefox
-
-
-OUTPUT_FOLDER = Path("inputs")
-
-
-if __name__ == "__main__":
-    print("Connecting to Moodle...")
-    course = connect_via_firefox("https://moodle.bath.ac.uk", 12345)
-
-    new_text = course.get_assignment_data(1234567)
-    new_filename = OUTPUT_FOLDER / "moodle_assignment.csv"
-    with open(new_filename, "wt") as f:
-        f.write(new_text)
-    print(f"Assignment metadata written to {new_filename}")
-
-    # Get final grades
-    (OUTPUT_FOLDER / f"moodle_grades.csv").write_text(course.get_grades())
+```
+roodle publish                    upload whatever differs from what Moodle holds
+roodle publish lecture-04.html    upload just these, changed or not
+roodle publish lecture-04         ...every file with that stem (.html and .pdf)
+roodle publish --dry-run          only list what would be uploaded
+roodle publish --check [FILE...]  only check the names and the login (before a build, say)
+roodle resources                  list the File resources, what each holds,
+                                  and which built file goes to each
 ```
 
-## Usage: publishing a static site to a "File" resource
+All of them take `-c CONFIG`, which defaults to `moodle.toml`.
 
-Moodle can host a static site (e.g. a rendered Quarto book) by unzipping a
-zip into a "File" resource's file area -- Moodle auto-detects `index.html`
-as the resource's main file, and relative links to the other files resolve
-via `pluginfile.php`. This re-does that "delete old files -> upload zip ->
-unzip -> delete zip -> save" sequence from a script instead of by hand:
+How it works:
+
+- **Matching files to resources by name.** No ids need writing down, apart
+  from a directory's. A built file with no resource yet is reported, and so
+  is a file name that more than one resource holds. A resource pinned by a
+  `cmid` is left out of the matching by name.
+- **Comparing with what's on Moodle.** Moodle serves every stored file with
+  its SHA-1 as the ETag, so each built file is checked against what Moodle
+  really holds, with nothing kept locally and nothing downloaded. Fixing one
+  deck uploads one deck, and a run that stops partway can simply be
+  repeated.
+- **Before uploading.** It lists where each file is going: the resource's
+  name on Moodle, and whether students can see it.
+- **Uploading.** Each upload does what you would do in "Edit settings":
+  delete the old files, upload the new one (unzipping a directory's zip),
+  and save. The resource's settings, visibility included, are left as they
+  are.
+- **When things go wrong.** If the login has expired, it waits for you to
+  log in again. If an upload fails, it offers to retry, skip it or quit.
+
+## The library
 
 ``` python
-from roodle import connect_via_firefox
+from roodle import Moodle
 
-course = connect_via_firefox("https://moodle.bath.ac.uk", 12345)
-course.replace_resource_files(
-    cmid=1594533,        # course module id, from the edit-settings URL
-    zip_path="_site.zip",
-    ctx_id=3165614,       # the module's context id
-    repo_id=3,            # id of the "Upload a file" repository instance
-    maxbytes=52428800,    # course's max upload size, in bytes
-)
+moodle = Moodle.from_firefox("https://moodle.bath.ac.uk")
+moodle.wait_for_login()          # asks you to log in, in Firefox, if need be
+course = moodle.course(12345)
+
+for module in course.modules():  # everything on the course page
+    print(module.cmid, module.module, module.name, module.visible)
+
+notes = course.resource(1594533)
+print(notes.held_file())         # HeldFile(name='index.html', context_id=...)
+if notes.compare("_build/book").status != "same":
+    notes.replace("_build/book")
 ```
 
-`ctx_id`, `repo_id` and `maxbytes` are stable for a given module/course but
-aren't easily discoverable from the page itself; find them once from a
-browser network capture (devtools -> Network -> do the upload by hand ->
-look at the `repository_ajax.php?action=upload` and `...action=list`
-requests) and hard-code them alongside the course/module ids. This also
-works for a "Folder" resource, since it uses the same `files` field and
-edit-form machinery.
+Requests that need it carry the session key (`moodle.sesskey`), read from
+the pages Moodle sends. `moodle.ajax(methodname, args)` calls any of
+Moodle's AJAX web service functions, and `moodle.page(url)` gets a page.
+Either raises `NotLoggedIn` when the session has expired.
 
+### Groups
 
+To put students into the groups that a CSV file gives:
+
+``` python
+import csv
+
+participants = course.participants()
+assigned = {row["Username"]: row["Group"] for row in csv.DictReader(open("groups.csv"))}
+sd_groups = [g.name for g in participants.groups if g.name.startswith("SD-")]
+
+for username, group in assigned.items():
+    change = participants.modify_groups(username, remove=sd_groups, add=[group])
+    if change:
+        print(change)
+```
+
+`modify_groups` only touches the groups it is given, so groups used for
+other purposes are left alone. `set_groups` sets a user's groups outright.
+Both take `dry_run=True`, which shows the change without making it.
+
+### Assignments, grades and choices
+
+``` python
+assignment = course.assignment(1234567)
+csv_text = assignment.grading_worksheet()      # plugin="offline_bath_2023" at Bath
+zip_file = assignment.download_submissions(["abc123", "def456"])
+
+grades_csv = course.grades()
+responses = course.choice_results(7654321)
+```
+
+## Development
+
+```
+uv run pytest
+```
+
+The tests run against a small fake Moodle (`tests/fake_moodle.py`), served
+through `httpx.MockTransport`. Real pages, saved from Moodle, go in
+`tests/pages/` for the parsers to be tested against.

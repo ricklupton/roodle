@@ -9,6 +9,15 @@ unchanged.  That avoids having to know (and keep up to date) every hidden
 field a particular mform happens to render.
 """
 
+import json
+import re
+from dataclasses import dataclass, field
+from urllib.parse import urljoin
+
+from bs4 import BeautifulSoup
+
+from .errors import MoodleError
+
 
 def find_moodleform(soup):
     """Find the <form> on a page that is a Moodle quickform (mform).
@@ -64,3 +73,77 @@ def serialize_form(form):
         fields[name] = el.get("value", "")
 
     return fields
+
+
+def filemanager_options(html):
+    """The options of each file manager on a page, by draft item id.
+
+    Moodle starts each file manager with `M.form_filemanager.init(Y, {...})`,
+    whose options give the draft area's item id, the upload limits (already
+    the smallest of the site's, the course's and the field's) and the
+    repositories the file picker offers, keyed by id.
+    """
+    found = {}
+    decoder = json.JSONDecoder()
+    for m in re.finditer(r"M\.form_filemanager\.init\(\s*Y\s*,\s*", html):
+        try:
+            options, _ = decoder.raw_decode(html, m.end())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(options, dict) and "itemid" in options:
+            found[int(options["itemid"])] = options
+    return found
+
+
+@dataclass
+class EditForm:
+    """A course module's "Edit settings" form, as it would be submitted
+    unchanged, with the file managers on it."""
+
+    moodle: object
+    cmid: int
+    action: str
+    fields: dict
+    context_id: int | None
+    filemanagers: dict = field(repr=False)
+
+    @classmethod
+    def load(cls, moodle, cmid):
+        page = moodle.page("/course/modedit.php", params={"update": cmid, "return": 0})
+        form = find_moodleform(page.soup)
+        action = urljoin(page.url, form.get("action") or "modedit.php")
+        return cls(moodle, cmid, action, serialize_form(form),
+                   page.cfg.get("contextid"), filemanager_options(page.html))
+
+    @property
+    def module(self):
+        """The module's type: "resource" for a File, "folder", "assign"..."""
+        return self.fields.get("modulename")
+
+    @property
+    def name(self):
+        return self.fields.get("name")
+
+    def draft_area(self, field_name="files"):
+        """The draft file area behind one of the form's file managers, already
+        holding the module's current files."""
+        from .files import DraftArea
+        if field_name not in self.fields:
+            raise MoodleError(f"cmid {self.cmid}: no '{field_name}' file manager "
+                              "on its edit form")
+        itemid = int(self.fields[field_name])
+        return DraftArea(self.moodle, itemid, self.fields["sesskey"],
+                         self.context_id, self.filemanagers.get(itemid, {}))
+
+    def submit(self, submitbutton="Save and display"):
+        """Save the form.  Moodle answers a successful save by redirecting,
+        and a refused one by showing the form again, with its errors."""
+        data = dict(self.fields, submitbutton=submitbutton)
+        r = self.moodle.check(self.moodle.post(self.action, data=data))
+        if not r.is_redirect:
+            errors = BeautifulSoup(r.text, "lxml").select(".error, .invalid-feedback")
+            message = "; ".join(e.get_text(" ", strip=True) for e in errors
+                                if e.get_text(strip=True))
+            raise MoodleError(f"cmid {self.cmid}: Moodle didn't save the form"
+                              + (f": {message}" if message else ""))
+        return r
