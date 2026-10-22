@@ -102,9 +102,8 @@ def publish(args):
                   "hold the same as the build.")
         return failed_matches
     if args.dry_run:
-        print("Would upload" + ("" if only else f" ({len(p.unchanged)} unchanged)") + ":")
-        for t in pending:
-            print(f"  {t.item.rel}")
+        print("\nWould upload" + ("" if only else f" ({len(p.unchanged)} unchanged)") + ":")
+        list_targets(pending)
         return failed_matches
 
     confirm(pending)
@@ -135,15 +134,20 @@ def check(config, names):
     return 0
 
 
+def list_targets(targets):
+    """Each file, the resource it goes to, and whether students can see it."""
+    for t in targets:
+        r = t.resource
+        print(f"  {t.item.rel}\n      -> '{r.name}', cmid {r.cmid}, {visibility(r)}"
+              + ("" if t.held_ok else f"   <- holds {t.held or 'no file'} now"))
+
+
 def confirm(pending):
     """List where each file is going, by the resource's name on Moodle and
     whether students can see it, and ask first if any resource holds a file
     of a different name now -- the sign of a mistyped cmid."""
     print("\nTo upload:")
-    for t in pending:
-        r = t.resource
-        print(f"  {t.item.rel}\n      -> '{r.name}', cmid {r.cmid}, {visibility(r)}"
-              + ("" if t.held_ok else f"   <- holds {t.held or 'no file'} now"))
+    list_targets(pending)
     if not all(t.held_ok for t in pending):
         if not yes("Some of these resources hold a file of another name now: check "
                    "they are the right ones. Upload? [Y/n] ", True):
