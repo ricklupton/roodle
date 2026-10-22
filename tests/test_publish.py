@@ -183,7 +183,8 @@ def run(fake, project, monkeypatch, capsys):
 def test_publish(fake, project, run):
     set_up_moodle(fake, project)
     status, out = run("publish", "--dry-run")
-    assert status == 0 and "Would upload (2 unchanged):\n  build/slides/lecture-01.html\n" in out
+    assert status == 0 and ("Would upload (2 unchanged):\n  build/slides/lecture-01.html\n"
+                            "      -> 'Lecture 1 slides', cmid 11, visible to students\n") in out
     assert fake.resources[11].files == {"lecture-01.html": b"old deck"}
 
     status, out = run("publish")
