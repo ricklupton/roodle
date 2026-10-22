@@ -74,3 +74,17 @@ def test_m_cfg():
     p = Page(httpx.Response(200, text=page("x", cfg={"contextid": 42}),
                             request=httpx.Request("GET", SERVER)))
     assert p.cfg["contextid"] == 42 and p.cfg["sesskey"] == SESSKEY
+
+
+def test_m_cfg_with_more_script_on_its_line():
+    # As Bath's Moodle (boost_union theme) writes it.
+    html = r"""<html><head><script>
+//<![CDATA[
+var M = {}; M.yui = {};
+M.pageloadstarttime = new Date();
+M.cfg = {"wwwroot":"https:\/\/moodle.bath.ac.uk","homeurl":{},"sesskey":"SESSKEY","contextid":2,"userId":104829};var yui1ConfigFn = function(me) {if(/-skin|reset|fonts|grids|base/.test(me.name)){me.type='css';me.path=me.path.replace(/\.js/,'.css')}};
+var yui2ConfigFn = function(me) {var parts=me.name.replace(/^moodle-/,'').split('-')};
+//]]>
+</script></head><body class="path-site"></body></html>"""
+    p = Page(httpx.Response(200, text=html, request=httpx.Request("GET", SERVER)))
+    assert p.cfg["sesskey"] == "SESSKEY" and p.cfg["contextid"] == 2

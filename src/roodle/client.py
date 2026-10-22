@@ -36,8 +36,14 @@ class Page:
     @cached_property
     def cfg(self):
         """The page's `M.cfg`: the sesskey, the page's context id, and so on."""
-        m = re.search(r"^\s*M\.cfg\s*=\s*(\{.*?\});\s*$", self.html, re.M)
-        return json.loads(m.group(1)) if m else {}
+        # Decode just the object: the same line can carry more script after it.
+        m = re.search(r"\bM\.cfg\s*=\s*(?=\{)", self.html)
+        if not m:
+            return {}
+        try:
+            return json.JSONDecoder().raw_decode(self.html, m.end())[0]
+        except json.JSONDecodeError:
+            return {}
 
     @property
     def logged_in(self):
