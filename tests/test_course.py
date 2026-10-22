@@ -6,8 +6,9 @@ def test_modules_from_course_state(fake, moodle):
     fake.add(12, "Quiz", module="quiz", section=1)
     fake.add(13, "Hidden notes", {"n.pdf": b"y"}, visible=False, section=1)
     modules = moodle.course(101).modules()
-    assert [(m.cmid, m.module, m.section, m.visible) for m in modules] == \
-        [(12, "quiz", 1, True), (13, "resource", 1, False), (11, "resource", 2, True)]
+    assert [(m.cmid, m.module, m.section, m.visible, m.stealth) for m in modules] == \
+        [(12, "quiz", 1, True, False), (13, "resource", 1, False, False),
+         (11, "resource", 2, True, False)]
     assert isinstance(modules[0], Module)
     assert [(r.cmid, r.name) for r in moodle.course(101).resources()] == \
         [(13, "Hidden notes"), (11, "Lecture 1")]

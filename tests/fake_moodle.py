@@ -43,6 +43,7 @@ class Resource:
     context_id: int
     files: dict = field(default_factory=dict)     # path -> bytes
     visible: bool = True
+    stealth: bool = False                         # available but not shown
     section: int = 1
     module: str = "resource"
     filtered: bool = False                        # "Use filters on file content"
@@ -119,6 +120,7 @@ class FakeMoodle:
                                         if r.section == s]}
                             for s in sorted({r.section for r in self.resources.values()})],
                 "cm": [{"id": str(r.cmid), "name": r.name, "visible": r.visible,
+                        "stealth": r.stealth,
                         "sectionid": 70 + r.section, "module": r.module,
                         "url": f"{SERVER}/mod/{r.module}/view.php?id={r.cmid}"}
                        for r in self.resources.values()],

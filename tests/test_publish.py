@@ -184,12 +184,12 @@ def test_publish(fake, project, run):
     set_up_moodle(fake, project)
     status, out = run("publish", "--dry-run")
     assert status == 0 and ("Would upload (2 unchanged):\n  build/slides/lecture-01.html\n"
-                            "      -> 'Lecture 1 slides', cmid 11, visible to students\n") in out
+                            "      -> 'Lecture 1 slides', cmid 11, shown to students\n") in out
     assert fake.resources[11].files == {"lecture-01.html": b"old deck"}
 
     status, out = run("publish")
     assert status == 0, out
-    assert "-> 'Lecture 1 slides', cmid 11, visible to students" in out
+    assert "-> 'Lecture 1 slides', cmid 11, shown to students" in out
     assert "Uploaded 1." in out
     assert fake.resources[11].files == {"lecture-01.html": b"deck 1"}
     assert "no resource on Moodle yet" in out
@@ -251,7 +251,17 @@ def test_resources(fake, project, run):
     set_up_moodle(fake, project)
     status, out = run("resources")
     assert status == 0
-    assert "'Lecture 1 slides'  cmid 11, visible to students\n        holds lecture-01.html" \
+    assert "'Lecture 1 slides'  cmid 11, shown to students\n        holds lecture-01.html" \
         "  <- build/slides/lecture-01.html" in out
-    assert "'Sheet 1'  cmid 14, hidden" in out
+    assert "'Sheet 1'  cmid 14, hidden from students" in out
     assert "build/slides/lecture-02.html: no resource on Moodle yet" in out
+
+
+def test_visibility_as_moodle_shows_it(fake, project, run):
+    set_up_moodle(fake, project)
+    fake.resources[11].stealth = True
+    status, out = run("publish", "--dry-run")
+    assert "cmid 11, available but not shown on course page\n" in out
+    fake.use_course_state = False          # the Files index page can't tell
+    status, out = run("publish", "--dry-run")
+    assert "cmid 11, visible to students\n" in out

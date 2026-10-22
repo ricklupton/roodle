@@ -72,6 +72,7 @@ def test_course_state():
     modules = moodle.course(1).modules()
     assert modules
     assert all(m.module and isinstance(m.visible, bool) for m in modules)
+    assert all(isinstance(m.stealth, bool) for m in modules)
     assert any(m.module == "resource" for m in modules)
     assert all(m.section is not None for m in modules)
 

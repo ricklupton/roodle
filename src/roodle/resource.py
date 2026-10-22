@@ -57,15 +57,17 @@ def zip_directory(path, zip_path):
 
 
 class FileResource:
-    """A File resource.  `name`, `visible` and `section` are as the course
-    page lists them, when it came from `Course.resources()`."""
+    """A File resource.  `name`, `visible`, `section` and `stealth` are as
+    the course page lists them, when it came from `Course.resources()`."""
 
-    def __init__(self, course, cmid, name=None, visible=None, section=None):
+    def __init__(self, course, cmid, name=None, visible=None, section=None,
+                 stealth=None):
         self.course = course
         self.cmid = int(cmid)
         self.name = name
         self.visible = visible
         self.section = section
+        self.stealth = stealth
         self._held = None
 
     def __repr__(self):

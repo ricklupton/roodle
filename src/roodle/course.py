@@ -19,6 +19,7 @@ class Module:
     section: int | None
     visible: bool | None     # False: hidden from students
     url: str | None = None
+    stealth: bool | None = None  # available, but not shown on the course page
 
 
 class Course:
@@ -57,6 +58,7 @@ class Course:
             section=cms[cmid].get("sectionnumber", sections.get(cms[cmid].get("sectionid"))),
             visible=cms[cmid].get("visible"),
             url=cms[cmid].get("url"),
+            stealth=cms[cmid].get("stealth"),
         ) for cmid in ids]
 
     def resources(self):
@@ -72,7 +74,8 @@ class Course:
             raise
         except MoodleError:
             found = self._resources_from_index()
-        return [FileResource(self, m.cmid, m.name, m.visible, m.section) for m in found]
+        return [FileResource(self, m.cmid, m.name, m.visible, m.section, m.stealth)
+                for m in found]
 
     def _resources_from_index(self):
         page = self.moodle.page("/mod/resource/index.php", params={"id": self.id})

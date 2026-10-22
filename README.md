@@ -74,7 +74,7 @@ moodle.wait_for_login()          # asks you to log in, in Firefox, if need be
 course = moodle.course(12345)
 
 for module in course.modules():  # everything on the course page
-    print(module.cmid, module.module, module.name, module.visible)
+    print(module.cmid, module.module, module.name, module.visible, module.stealth)
 
 notes = course.resource(1594533)
 print(notes.held_file())         # HeldFile(name='index.html', context_id=...)
