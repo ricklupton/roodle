@@ -55,8 +55,12 @@ def size(path):
 
 
 def visibility(resource):
-    return {True: "visible to students", False: "hidden"}.get(
-        resource.visible, "visibility unknown")
+    """Whether students can see the resource, as Moodle's course page puts it."""
+    if not resource.visible:
+        return "hidden from students"
+    if resource.stealth:
+        return "available but not shown on course page"
+    return "shown to students"
 
 
 def connect(config):

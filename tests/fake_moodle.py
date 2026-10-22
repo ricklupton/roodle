@@ -43,6 +43,7 @@ class Resource:
     context_id: int
     files: dict = field(default_factory=dict)     # path -> bytes
     visible: bool = True
+    stealth: bool = False                         # available but not shown
     section: int = 1
     module: str = "resource"
     filtered: bool = False                        # "Use filters on file content"
@@ -62,7 +63,6 @@ class FakeMoodle:
         self.drafts = {}          # itemid -> {path: bytes}
         self.requests = []        # (method, path, action) of each request
         self.next_item = 900
-        self.use_course_state = True
 
     def add(self, cmid, name, files=None, **kw):
         self.resources[cmid] = Resource(cmid, name, 5000 + cmid, dict(files or {}), **kw)
@@ -94,8 +94,6 @@ class FakeMoodle:
             return httpx.Response(200, text=page("Home"))
         if path == "/lib/ajax/service.php":
             return self.ajax(json.loads(request.content)[0])
-        if path == "/mod/resource/index.php":
-            return httpx.Response(200, text=self.index_page())
         if path == "/mod/resource/view.php":
             return self.view(int(query["id"]))
         if path.startswith("/pluginfile.php/"):
@@ -111,7 +109,7 @@ class FakeMoodle:
         return httpx.Response(404, text="Not found")
 
     def ajax(self, call):
-        if call["methodname"] == "core_courseformat_get_state" and self.use_course_state:
+        if call["methodname"] == "core_courseformat_get_state":
             state = {
                 "course": {"id": COURSE},
                 "section": [{"id": 70 + s, "number": s,
@@ -119,7 +117,9 @@ class FakeMoodle:
                                         if r.section == s]}
                             for s in sorted({r.section for r in self.resources.values()})],
                 "cm": [{"id": str(r.cmid), "name": r.name, "visible": r.visible,
-                        "sectionid": 70 + r.section, "module": r.module,
+                        "stealth": r.stealth,
+                        "sectionid": 70 + r.section, "sectionnumber": r.section,
+                        "module": r.module,
                         "url": f"{SERVER}/mod/{r.module}/view.php?id={r.cmid}"}
                        for r in self.resources.values()],
             }
@@ -127,14 +127,6 @@ class FakeMoodle:
         return httpx.Response(200, json=[{"error": True, "exception": {
             "message": "Can't find data record in database table external_functions.",
             "errorcode": "invalidrecord"}}])
-
-    def index_page(self):
-        dimmed = 'class="dimmed" '
-        rows = "".join(
-            f'<tr><td><a {"" if r.visible else dimmed}'
-            f'href="view.php?id={r.cmid}">{r.name}</a></td></tr>'
-            for r in self.resources.values() if r.module == "resource")
-        return page(f"<table>{rows}</table>")
 
     def view(self, cmid):
         r = self.resources[cmid]
