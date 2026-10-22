@@ -16,7 +16,7 @@ def test_modules_from_course_state(fake, moodle):
         [(13, "Hidden notes"), (11, "Lecture 1")]
 
 
-def test_course_state_without_a_field_it_needs(fake, moodle, monkeypatch):
+def test_course_state_without_a_field_it_needs(fake):
     import httpx
     import pytest
     from roodle import MoodleError
@@ -34,4 +34,4 @@ def test_course_state_without_a_field_it_needs(fake, moodle, monkeypatch):
         return r
     fake.handle = without_stealth
     with pytest.raises(MoodleError, match="stealth"):
-        moodle.course(101).resources()
+        fake.moodle().course(101).resources()
