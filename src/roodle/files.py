@@ -140,6 +140,12 @@ def serves_same(moodle, url, sha1):
     missing file is False.  No ETag means Moodle ran the file through its
     filters ("Use filters on file content"), so the bytes it sends aren't the
     ones it holds.
+
+    A site that keeps its files in an object store (tool_objectfs, say) may
+    instead redirect to the store, for big files especially.  Such stores
+    name each file by its content hash, so the hash is read from the URL;
+    without one there, it is None.  A redirect to Moodle's own login page is
+    NotLoggedIn.
     """
     with moodle.http.stream("GET", url, headers={"Accept-Encoding": "identity",
                                                  "If-None-Match": f'"{sha1}"'}) as r:
@@ -147,6 +153,11 @@ def serves_same(moodle, url, sha1):
             return True
         if r.status_code == 404:
             return False
+        if r.is_redirect:
+            target = r.url.join(r.headers.get("Location", ""))
+            if target.host != r.url.host:
+                found = re.search(r"(?<![0-9a-f])[0-9a-f]{40}(?![0-9a-f])", target.path)
+                return found.group(0) == sha1 if found else None
         moodle.check(r)
         if r.status_code != 200:
             raise MoodleError(f"Moodle answered {r.status_code} for {url}")

@@ -46,6 +46,7 @@ class Resource:
     section: int = 1
     module: str = "resource"
     filtered: bool = False                        # "Use filters on file content"
+    object_store: str = ""                        # redirect to a store: "hash" or "other"
 
     @property
     def main_file(self):
@@ -150,6 +151,10 @@ class FakeMoodle:
         if data is None:
             return httpx.Response(404)
         sha1 = hashlib.sha1(data).hexdigest()
+        if r.object_store:
+            key = f"{sha1[:2]}/{sha1[2:4]}/{sha1}" if r.object_store == "hash" else "file"
+            return httpx.Response(302, headers={"Location": (
+                f"https://store.example.com/bucket/{key}?X-Amz-Signature=abc")})
         if r.filtered:
             return httpx.Response(200, content=data)
         if request.headers.get("If-None-Match", "").strip('W/"') == sha1:

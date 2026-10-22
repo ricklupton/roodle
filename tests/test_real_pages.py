@@ -91,5 +91,10 @@ def test_pluginfile_etag_is_the_content_hash():
     answers = json.loads(saved("answers.json"))
     if "pluginfile" not in answers:
         pytest.skip("the resource held no file")
-    assert re.search(r"[0-9a-f]{40}", answers["pluginfile"]["headers"]["etag"])
+    served = answers["pluginfile"]
+    if served["status"] in (301, 302, 303, 307):
+        # From a file store, which names the file by its content hash.
+        assert re.search(r"[0-9a-f]{40}", served["headers"]["location"])
+        return
+    assert re.search(r"[0-9a-f]{40}", served["headers"]["etag"])
     assert answers["pluginfile_if_none_match"]["status"] == 304

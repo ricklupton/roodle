@@ -37,9 +37,15 @@ def main():
         print(f"  {args.out / name}")
 
     def meta(r):
-        return {"status": r.status_code, "url": str(r.url),
-                "headers": {k: v for k, v in r.headers.items()
-                            if k.lower() in ("location", "etag", "content-type")}}
+        headers = {k.lower(): v for k, v in r.headers.items()
+                   if k.lower() in ("location", "etag", "content-type")}
+        if "location" in headers:
+            # A link to another site (a file store) may be signed: keep only
+            # where it goes.
+            target = r.url.join(headers["location"])
+            if target.host != r.url.host:
+                headers["location"] = str(target.copy_with(query=None))
+        return {"status": r.status_code, "url": str(r.url), "headers": headers}
 
     save("front.html", moodle.http.get("/", follow_redirects=True).text)
     save("modedit.html", moodle.http.get(
