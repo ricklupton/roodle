@@ -91,7 +91,7 @@ def publish(args):
     unhashed = [t.item.name for t in p.unknown if not t.note]
     if unhashed:
         print(f"Moodle didn't give a content hash for {', '.join(unhashed)}, so "
-              "there's no telling whether they changed -- is 'Use filters on "
+              "there's no telling whether they changed.  Is 'Use filters on "
               "file content' on for them?")
     failed_matches = 1 if only is not None and p.unmatched else 0
 

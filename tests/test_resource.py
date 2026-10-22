@@ -90,3 +90,26 @@ def test_replace_too_large_changes_nothing(fake, course, tmp_path):
         course.resource(11).replace(f)
     assert fake.resources[11].files == {"big.pdf": b"small"}
     assert ("POST", "/repository/draftfiles_ajax.php", "delete") not in fake.requests
+
+
+def test_compare_file_served_from_an_object_store(fake, course, tmp_path):
+    f = tmp_path / "book.pdf"
+    f.write_bytes(b"%PDF new")
+    fake.add(11, "Book PDF", {"book.pdf": b"%PDF new"}, object_store="hash")
+    assert course.resource(11).compare(f).status == "same"
+    fake.resources[11].files["book.pdf"] = b"%PDF old"
+    assert course.resource(11).compare(f).status == "changed"
+    fake.resources[11].object_store = "other"
+    assert course.resource(11).compare(f).status == "unknown"
+
+
+def test_compare_logged_out(fake, course, tmp_path):
+    from roodle import NotLoggedIn
+    f = tmp_path / "l1.html"
+    f.write_bytes(b"x")
+    fake.add(11, "Lecture 1", {"l1.html": b"x"})
+    resource = course.resource(11)
+    resource.held_file()
+    fake.logged_in = False
+    with pytest.raises(NotLoggedIn):
+        resource.compare(f)
