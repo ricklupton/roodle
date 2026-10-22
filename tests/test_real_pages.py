@@ -12,7 +12,6 @@ import pytest
 
 from roodle import Moodle
 from roodle.client import Page
-from roodle.course import parse_resource_index
 from roodle.forms import filemanager_options, find_moodleform, serialize_form
 
 PAGES = Path(__file__).parent / "pages"
@@ -71,15 +70,9 @@ def test_course_state():
     moodle._sesskey = "SESSKEY"
     modules = moodle.course(1).modules()
     assert modules
-    assert all(m.module and isinstance(m.visible, bool) for m in modules)
-    assert all(isinstance(m.stealth, bool) for m in modules)
+    assert all(isinstance(m.visible, bool) and isinstance(m.stealth, bool)
+               and isinstance(m.section, int) for m in modules)
     assert any(m.module == "resource" for m in modules)
-    assert all(m.section is not None for m in modules)
-
-
-def test_resource_index():
-    page = as_page("resource-index.html")
-    assert parse_resource_index(page.soup, SERVER + "/mod/resource/index.php?id=1")
 
 
 def test_resource_view_redirects_to_its_file():

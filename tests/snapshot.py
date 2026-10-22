@@ -50,8 +50,6 @@ def main():
     save("front.html", moodle.http.get("/", follow_redirects=True).text)
     save("modedit.html", moodle.http.get(
         "/course/modedit.php", params={"update": args.cmid, "return": 0}).text)
-    save("resource-index.html", moodle.http.get(
-        "/mod/resource/index.php", params={"id": config.course}).text)
     save("course-state.json", moodle.http.post(
         "/lib/ajax/service.php",
         params={"sesskey": sesskey, "info": "core_courseformat_get_state"},

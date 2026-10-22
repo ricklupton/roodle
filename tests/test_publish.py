@@ -262,6 +262,3 @@ def test_visibility_as_moodle_shows_it(fake, project, run):
     fake.resources[11].stealth = True
     status, out = run("publish", "--dry-run")
     assert "cmid 11, available but not shown on course page\n" in out
-    fake.use_course_state = False          # the Files index page can't tell
-    status, out = run("publish", "--dry-run")
-    assert "cmid 11, visible to students\n" in out

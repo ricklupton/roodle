@@ -4,9 +4,8 @@ A Moodle course, and the modules in it.
 
 import json
 from dataclasses import dataclass
-from urllib.parse import parse_qs, urljoin, urlparse
 
-from .errors import MoodleError, NotLoggedIn
+from .errors import MoodleError
 
 
 @dataclass(frozen=True)
@@ -15,11 +14,11 @@ class Module:
 
     cmid: int
     name: str
-    module: str              # "resource" for a File, "folder", "assign"...
-    section: int | None
-    visible: bool | None     # False: hidden from students
+    module: str          # "resource" for a File, "folder", "assign"...
+    section: int
+    visible: bool        # False: hidden from students
+    stealth: bool        # True: available, but not shown on the course page
     url: str | None = None
-    stealth: bool | None = None  # available, but not shown on the course page
 
 
 class Course:
@@ -39,47 +38,34 @@ class Course:
     def modules(self):
         """Every module in the course, hidden ones included, in course order.
 
-        This is the course state the course page's own JavaScript loads
-        (core_courseformat_get_state, Moodle 4.0 on).
+        This is the course state that the course page's own JavaScript loads
+        (core_courseformat_get_state).
         """
         state = self.moodle.ajax("core_courseformat_get_state", {"courseid": self.id})
         if isinstance(state, str):
             state = json.loads(state)
-        sections = {s["id"]: s.get("number", s.get("section"))
-                    for s in state.get("section", [])}
-        order = [cmid for s in state.get("section", []) for cmid in s.get("cmlist", [])]
-        cms = {int(cm["id"]): cm for cm in state.get("cm", [])}
-        ids = [int(c) for c in order if int(c) in cms] or list(cms)
-        ids += [c for c in cms if c not in ids]
-        return [Module(
-            cmid=cmid,
-            name=cms[cmid].get("name", ""),
-            module=cms[cmid].get("module", ""),
-            section=cms[cmid].get("sectionnumber", sections.get(cms[cmid].get("sectionid"))),
-            visible=cms[cmid].get("visible"),
-            url=cms[cmid].get("url"),
-            stealth=cms[cmid].get("stealth"),
-        ) for cmid in ids]
+        try:
+            cms = {int(cm["id"]): cm for cm in state["cm"]}
+            order = [int(c) for s in state["section"] for c in s["cmlist"]]
+            order += [c for c in cms if c not in order]
+            return [Module(
+                cmid=c,
+                name=cms[c]["name"],
+                module=cms[c]["module"],
+                section=cms[c]["sectionnumber"],
+                visible=cms[c]["visible"],
+                stealth=cms[c]["stealth"],
+                url=cms[c].get("url"),
+            ) for c in order if c in cms]
+        except (KeyError, TypeError, ValueError) as e:
+            raise MoodleError(f"The course state from Moodle isn't as roodle expects "
+                              f"(missing or odd {e}): has Moodle changed?") from e
 
     def resources(self):
-        """Every File resource in the course, hidden ones included.
-
-        From the course state if this Moodle gives it, and otherwise from
-        the course's "Files" index page.
-        """
+        """Every File resource in the course, hidden ones included."""
         from .resource import FileResource
-        try:
-            found = [m for m in self.modules() if m.module == "resource"]
-        except NotLoggedIn:
-            raise
-        except MoodleError:
-            found = self._resources_from_index()
         return [FileResource(self, m.cmid, m.name, m.visible, m.section, m.stealth)
-                for m in found]
-
-    def _resources_from_index(self):
-        page = self.moodle.page("/mod/resource/index.php", params={"id": self.id})
-        return parse_resource_index(page.soup, page.url)
+                for m in self.modules() if m.module == "resource"]
 
     def resource(self, cmid):
         from .resource import FileResource
@@ -135,26 +121,3 @@ class Course:
             data={"id": str(cmid), "download": "txt", "sesskey": self.moodle.sesskey},
         ))
         return r.text
-
-
-def parse_resource_index(soup, page_url):
-    """The File resources linked from a course's "Files" index page.
-
-    Moodle writes the links relative to the page (href="view.php?id=..."),
-    so each is resolved against the page's URL before it is matched; a
-    resource hidden from students has class="dimmed".
-    """
-    found = {}
-    for a in soup.find_all("a", href=True):
-        url = urlparse(urljoin(page_url, a["href"]))
-        cmid = parse_qs(url.query).get("id", [""])[0]
-        if url.path.endswith("/mod/resource/view.php") and cmid.isdigit():
-            found.setdefault(int(cmid), Module(
-                cmid=int(cmid),
-                name=a.get_text(" ", strip=True),
-                module="resource",
-                section=None,
-                visible="dimmed" not in a.get("class", []),
-                url=url.geturl(),
-            ))
-    return list(found.values())
