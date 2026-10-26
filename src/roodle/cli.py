@@ -9,8 +9,14 @@ files go to it: see roodle.publish.
 """
 
 import argparse
+import os
+import shlex
+import shutil
+import subprocess
 import sys
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 
 import httpx
 
@@ -105,9 +111,11 @@ def publish(args):
         print("Would upload" + ("" if only else f" ({len(p.unchanged)} unchanged)") + ":")
         for t in pending:
             print(f"  {t.item.rel}")
+        if args.diff:
+            diff(pending)
         return failed_matches
 
-    confirm(pending)
+    confirm(pending, args.diff)
     failed = upload(moodle, course, pending)
     if failed:
         print(f"\nNot uploaded: {', '.join(failed)}")
@@ -135,20 +143,93 @@ def check(config, names):
     return 0
 
 
-def confirm(pending):
+def confirm(pending, show_diff=False):
     """List where each file is going, by the resource's name on Moodle and
     whether students can see it, and ask first if any resource holds a file
-    of a different name now -- the sign of a mistyped cmid."""
+    of a different name now -- the sign of a mistyped cmid -- or after
+    showing the diff."""
     print("\nTo upload:")
     for t in pending:
         r = t.resource
         print(f"  {t.item.rel}\n      -> '{r.name}', cmid {r.cmid}, {visibility(r)}"
               + ("" if t.held_ok else f"   <- holds {t.held or 'no file'} now"))
+    if show_diff:
+        diff(pending)
     if not all(t.held_ok for t in pending):
-        if not yes("Some of these resources hold a file of another name now: check "
-                   "they are the right ones. Upload? [Y/n] ", True):
-            raise SystemExit("Not uploading.")
+        question = ("Some of these resources hold a file of another name now: check "
+                    "they are the right ones. Upload? [Y/n] ")
+    elif show_diff:
+        question = "Upload? [Y/n] "
+    else:
+        question = None
+    if question and not yes(question, True):
+        raise SystemExit("Not uploading.")
     print()
+
+
+def diff(pending):
+    """Show how each upload would change what Moodle holds.
+
+    Moodle's copies of the files that differ, and the local ones, are put in
+    a temporary directory as moodle/ and local/, each under the item's path
+    from the config file, and compared with `git diff --no-index` -- so
+    git's pager, colours and diff settings apply -- or `diff -ruN` without
+    git.  $ROODLE_DIFF, if set, is a command to run instead: it is given the
+    two directories, or they replace {old} and {new} in it.  Its directory
+    is kept, in case the command returns before it has read the files
+    (`emacsclient`, say).
+    """
+    tmp = Path(tempfile.mkdtemp(prefix="roodle-diff-"))
+    try:
+        if not gather_changes(pending, tmp / "moodle", tmp / "local"):
+            print("  No differences: Moodle holds the same files.")
+        elif not run_diff(tmp, os.environ.get("ROODLE_DIFF")):
+            return  # keep the files
+    except BaseException:
+        shutil.rmtree(tmp, ignore_errors=True)
+        raise
+    shutil.rmtree(tmp, ignore_errors=True)
+
+
+def gather_changes(pending, old, new):
+    """Fetch each target's changes into `old` and `new`; the number of files."""
+    print("\nFetching Moodle's copies of what differs...")
+    changed = 0
+    for t in pending:
+        base = Path(t.item.rel) if t.item.path.is_dir() else Path(t.item.rel).parent
+        changed += len(t.resource.fetch_changes(t.item.path, old / base, new / base))
+        if t.item.path.is_dir():
+            print(f"  {t.item.rel}: any files Moodle holds that the build doesn't "
+                  "aren't shown (the upload deletes them)")
+    old.mkdir(exist_ok=True)
+    new.mkdir(exist_ok=True)
+    return changed
+
+
+def run_diff(tmp, tool):
+    """Compare tmp/moodle with tmp/local; False if the files should be kept."""
+    sys.stdout.flush()
+    if tool:
+        args = shlex.split(tool)
+        if not any("{old}" in a or "{new}" in a for a in args):
+            args += ["{old}", "{new}"]
+        args = [a.replace("{old}", str(tmp / "moodle")).replace("{new}", str(tmp / "local"))
+                for a in args]
+        try:
+            subprocess.run(args, cwd=tmp, check=False)
+        except OSError as e:
+            print(f"  Couldn't run $ROODLE_DIFF ({tool}): {e}")
+        print(f"  (The files are in {tmp})")
+        return False
+    for command in (["git", "diff", "--no-index", "--no-prefix", "moodle", "local"],
+                    ["diff", "-ruN", "moodle", "local"]):
+        try:
+            subprocess.run(command, cwd=tmp, check=False)
+            return True
+        except FileNotFoundError:
+            continue
+    print(f"  Found neither git nor diff to compare them with: the files are in {tmp}")
+    return False
 
 
 def upload(moodle, course, pending):
@@ -230,6 +311,9 @@ def main(argv=None):
                         "name, or a file name without its extension")
     p.add_argument("-n", "--dry-run", action="store_true",
                    help="only list what would be uploaded")
+    p.add_argument("-d", "--diff", action="store_true",
+                   help="show how each upload differs from what Moodle holds, "
+                        "with git diff or $ROODLE_DIFF, and ask before uploading")
     p.add_argument("--force", action="store_true",
                    help="upload everything, changed or not")
     p.add_argument("--check", action="store_true",

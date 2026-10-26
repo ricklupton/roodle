@@ -4,6 +4,7 @@ main file (a static site, say).
 """
 
 import re
+import shutil
 import tempfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,7 +13,7 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from .errors import NotAFileResource
-from .files import pluginfile_url, serves_same, sha1_file
+from .files import download, pluginfile_url, serves_same, sha1_file
 from .forms import EditForm
 
 
@@ -133,6 +134,58 @@ class FileResource:
         else:
             status = "same"
         return Comparison(status, held.name)
+
+    def fetch_changes(self, path, old, new, workers=8):
+        """Copy each file that replacing the resource's content with `path`
+        would change into two directories, under its name in the resource:
+        the one Moodle holds into `old`, and the local one into `new`.  A
+        file only one side has is copied only there.  Returns the names
+        copied, for diffing `old` against `new`.
+
+        Like `compare`, this goes by content hash, downloading only what
+        differs.  So it only sees the files Moodle holds under the names of
+        local ones, and the main file: any others the resource holds, which
+        `replace` deletes, aren't copied.
+        """
+        old, new = Path(old), Path(new)
+        held = self.held_file()
+
+        def url(name):
+            return pluginfile_url(self.moodle, held.context_id, "mod_resource",
+                                  "content", 0, name)
+
+        def write(root, name, data=None, source=None):
+            (root / name).parent.mkdir(parents=True, exist_ok=True)
+            if source is not None:
+                shutil.copyfile(source, root / name)
+            else:
+                (root / name).write_bytes(data)
+
+        def fetch(f):
+            p, name = f
+            if held is None:
+                return name, None, True
+            if serves_same(self.moodle, url(name), sha1_file(p)):
+                return name, None, False
+            data = download(self.moodle, url(name))
+            return name, data, data != p.read_bytes()
+
+        files = local_files(path)
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            fetched = list(pool.map(fetch, files))
+        changed = []
+        for (p, _), (name, data, differs) in zip(files, fetched):
+            if differs:
+                write(new, name, source=p)
+                if data is not None:
+                    write(old, name, data)
+                changed.append(name)
+        if held is not None and held.name not in {name for _, name in files}:
+            data = download(self.moodle, url(held.name))
+            if data is not None:
+                write(old, held.name, data)
+                changed.append(held.name)
+        return sorted(changed)
 
     def edit_form(self):
         return EditForm.load(self.moodle, self.cmid)

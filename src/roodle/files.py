@@ -152,3 +152,14 @@ def serves_same(moodle, url, sha1):
             raise MoodleError(f"Moodle answered {r.status_code} for {url}")
         etag = re.search(r"[0-9a-f]{40}", r.headers.get("ETag", ""))
         return etag.group(0) == sha1 if etag else None
+
+
+def download(moodle, url):
+    """The bytes Moodle serves at `url`, or None if it has no file there."""
+    r = moodle.http.get(url, headers={"Accept-Encoding": "identity"})
+    if r.status_code == 404:
+        return None
+    moodle.check(r)
+    if r.status_code != 200:
+        raise MoodleError(f"Moodle answered {r.status_code} for {url}")
+    return r.content

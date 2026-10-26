@@ -54,6 +54,52 @@ def test_compare_directory(fake, course, tmp_path):
     assert course.resource(20).compare(site).status == "changed"
 
 
+def tree(root):
+    return {p.relative_to(root).as_posix(): p.read_bytes()
+            for p in sorted(root.rglob("*")) if p.is_file()}
+
+
+def test_fetch_changes_of_a_file(fake, course, tmp_path):
+    f = tmp_path / "l1.html"
+    f.write_bytes(b"new")
+    fake.add(11, "Lecture 1", {"l1.html": b"new"})
+    old, new = tmp_path / "old", tmp_path / "new"
+    assert course.resource(11).fetch_changes(f, old, new) == []
+    assert not old.exists() and not new.exists()
+    fake.resources[11].files["l1.html"] = b"old"
+    assert course.resource(11).fetch_changes(f, old, new) == ["l1.html"]
+    assert (tree(old), tree(new)) == ({"l1.html": b"old"}, {"l1.html": b"new"})
+
+
+def test_fetch_changes_with_another_file_held(fake, course, tmp_path):
+    f = tmp_path / "l1.html"
+    f.write_bytes(b"new")
+    fake.add(11, "Lecture 1", {"other.html": b"other"})
+    old, new = tmp_path / "old", tmp_path / "new"
+    assert course.resource(11).fetch_changes(f, old, new) == ["l1.html", "other.html"]
+    assert (tree(old), tree(new)) == ({"other.html": b"other"}, {"l1.html": b"new"})
+
+
+def test_fetch_changes_of_an_empty_resource(fake, course, tmp_path):
+    f = tmp_path / "l1.html"
+    f.write_bytes(b"new")
+    fake.add(11, "Lecture 1")
+    old, new = tmp_path / "old", tmp_path / "new"
+    assert course.resource(11).fetch_changes(f, old, new) == ["l1.html"]
+    assert not old.exists() and tree(new) == {"l1.html": b"new"}
+
+
+def test_fetch_changes_of_a_directory(fake, course, tmp_path):
+    site = make_site(tmp_path / "site", {"index.html": "home", "a.html": "a",
+                                         "site_libs/x.js": "js2", "new.html": "new"})
+    fake.add(20, "Book", {"index.html": b"home", "a.html": b"a", "site_libs/x.js": b"js"},
+             filtered=True)   # no ETags: unchanged files are told apart by their bytes
+    old, new = tmp_path / "old", tmp_path / "new"
+    assert course.resource(20).fetch_changes(site, old, new) == ["new.html", "site_libs/x.js"]
+    assert tree(old) == {"site_libs/x.js": b"js"}
+    assert tree(new) == {"new.html": b"new", "site_libs/x.js": b"js2"}
+
+
 def test_replace_file(fake, course, tmp_path):
     f = tmp_path / "l1.pdf"
     f.write_bytes(b"%PDF new")

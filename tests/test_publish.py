@@ -1,3 +1,5 @@
+import shutil
+
 import pytest
 
 from roodle import cli
@@ -170,13 +172,18 @@ def test_two_built_files_with_one_name(fake, moodle, project):
 # --------------------------------------------------------------------- cli
 
 @pytest.fixture
-def run(fake, project, monkeypatch, capsys):
+def run(fake, project, monkeypatch, capfd):
     monkeypatch.setattr(cli.Moodle, "from_firefox", lambda server: fake.moodle())
     monkeypatch.setattr("builtins.input", lambda prompt: pytest.fail(f"asked: {prompt}"))
+    # capfd, not capsys, to see what a diff command run by --diff prints;
+    # and none of the machine's git settings, to see it as git prints it.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.delenv("ROODLE_DIFF", raising=False)
 
     def run(*args):
         status = cli.main([*args, "-c", str(project / "moodle.toml")])
-        return status, capsys.readouterr().out
+        return status, capfd.readouterr().out
     return run
 
 
@@ -195,6 +202,43 @@ def test_publish(fake, project, run):
 
     status, out = run("publish")
     assert "Moodle is up to date: 3 resources hold the same as the build." in out
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_publish_dry_run_diff(fake, project, run):
+    set_up_moodle(fake, project)
+    fake.resources[20].files["site_libs/x.js"] = b"old js"
+    status, out = run("publish", "--dry-run", "--diff")
+    assert status == 0, out
+    assert "--- moodle/build/slides/lecture-01.html\n" \
+           "+++ local/build/slides/lecture-01.html\n" in out
+    assert "-old deck\n\\ No newline at end of file\n+deck 1\n" in out
+    assert "--- moodle/build/book/site_libs/x.js\n+++ local/build/book/site_libs/x.js\n" in out
+    assert "build/book: any files Moodle holds that the build doesn't aren't shown" in out
+    assert fake.resources[11].files == {"lecture-01.html": b"old deck"}
+
+
+def test_publish_diff_with_a_tool_then_ask(fake, project, run, monkeypatch, tmp_path):
+    set_up_moodle(fake, project)
+    monkeypatch.setattr("tempfile.tempdir", str(tmp_path))   # where the files are kept
+    seen = tmp_path / "seen"
+    monkeypatch.setenv("ROODLE_DIFF", f"cp -r {{old}} {seen}")
+    monkeypatch.setattr("builtins.input", lambda prompt: "n")
+    with pytest.raises(SystemExit, match="Not uploading"):
+        run("publish", "--diff")
+    assert (seen / "build/slides/lecture-01.html").read_bytes() == b"old deck"
+    assert fake.resources[11].files == {"lecture-01.html": b"old deck"}
+
+    monkeypatch.setattr("builtins.input", lambda prompt: "")
+    status, out = run("publish", "--diff")
+    assert status == 0 and "Uploaded 1." in out
+    assert fake.resources[11].files == {"lecture-01.html": b"deck 1"}
+
+
+def test_publish_diff_of_nothing(fake, project, run):
+    set_up_moodle(fake, project)
+    status, out = run("publish", "--dry-run", "--diff", "--force", "lecture-01.pdf")
+    assert status == 0 and "No differences" in out
 
 
 def test_publish_named_files(fake, project, run):
