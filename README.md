@@ -39,11 +39,27 @@ roodle publish                    upload whatever differs from what Moodle holds
 roodle publish lecture-04.html    upload just these, changed or not
 roodle publish lecture-04         ...every file with that stem (.html and .pdf)
 roodle publish --dry-run          only list what would be uploaded
+roodle publish --diff             show how each upload differs from Moodle, then ask
+roodle publish -n --diff          ...and only show it
 roodle publish --check [FILE...]  only check the names and the login (before a build, say)
 roodle resources                  list the File resources
 ```
 
 All of them take `-c CONFIG`, which defaults to `moodle.toml`.
+
+`--diff` downloads Moodle's copies of the files that differ into a temporary
+directory, beside the built ones, and runs `git diff --no-index` on them, so
+git's pager, colours and settings (`diff.external`, `core.pager` for delta,
+and so on) apply. To use another tool, set `ROODLE_DIFF` to a command: it is
+given the two directories, or they replace `{old}` and `{new}` in it.
+
+```
+export ROODLE_DIFF=meld
+export ROODLE_DIFF="emacsclient --eval '(diff \"{old}\" \"{new}\" \"-ruN\")'"
+```
+
+For a directory, only the files in the build are compared: any others that
+Moodle holds there aren't shown, though the upload deletes them.
 
 roodle compares files to the version already on Moodle (via its ETag) to avoid
 unnecessary uploads of unchanged files. Each upload does what you would do in
