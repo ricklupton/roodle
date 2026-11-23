@@ -166,10 +166,21 @@ def serves_same(moodle, url, sha1):
 
 
 def download(moodle, url):
-    """The bytes Moodle serves at `url`, or None if it has no file there."""
-    r = moodle.http.get(url, headers={"Accept-Encoding": "identity"})
+    """The bytes Moodle serves at `url`, or None if it has no file there.
+
+    A redirect to another site is taken to be to an object store, as
+    `serves_same` takes it, and followed; if that site redirects again (to
+    single sign-on, say), or Moodle redirects to its login page, it is
+    NotLoggedIn.
+    """
+    headers = {"Accept-Encoding": "identity"}
+    r = moodle.http.get(url, headers=headers)
     if r.status_code == 404:
         return None
+    if r.is_redirect:
+        target = r.url.join(r.headers.get("Location", ""))
+        if target.host != r.url.host:
+            r = moodle.http.get(target, headers=headers)
     moodle.check(r)
     if r.status_code != 200:
         raise MoodleError(f"Moodle answered {r.status_code} for {url}")

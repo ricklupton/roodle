@@ -236,6 +236,14 @@ def test_publish_diff_with_a_tool_then_ask(fake, project, run, monkeypatch, tmp_
     assert fake.resources[11].files == {"lecture-01.html": b"deck 1"}
 
 
+def test_publish_diff_of_a_filtered_resource(fake, project, run, monkeypatch):
+    set_up_moodle(fake, project)
+    fake.resources[11].filtered = True
+    monkeypatch.setenv("ROODLE_DIFF", "true")
+    status, out = run("publish", "--dry-run", "--diff")
+    assert "lecture-01.html: Moodle filters this resource's files" in out
+
+
 def test_publish_diff_of_nothing(fake, project, run):
     set_up_moodle(fake, project)
     status, out = run("publish", "--dry-run", "--diff", "--force", "lecture-01.pdf")

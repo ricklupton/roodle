@@ -100,6 +100,16 @@ def test_fetch_changes_of_a_directory(fake, course, tmp_path):
     assert tree(new) == {"new.html": b"new", "site_libs/x.js": b"js2"}
 
 
+@pytest.mark.parametrize("store", ["hash", "other"])
+def test_fetch_changes_from_an_object_store(fake, course, tmp_path, store):
+    f = tmp_path / "l1.pdf"
+    f.write_bytes(b"new")
+    fake.add(11, "Lecture 1", {"l1.pdf": b"old"}, object_store=store)
+    old, new = tmp_path / "old", tmp_path / "new"
+    assert course.resource(11).fetch_changes(f, old, new) == ["l1.pdf"]
+    assert tree(old) == {"l1.pdf": b"old"}
+
+
 def test_replace_file(fake, course, tmp_path):
     f = tmp_path / "l1.pdf"
     f.write_bytes(b"%PDF new")

@@ -209,6 +209,9 @@ def gather_changes(pending, old, new):
         if t.item.path.is_dir():
             print(f"  {t.item.rel}: any files Moodle holds that the build doesn't "
                   "aren't shown (the upload deletes them)")
+        if t.status == "unknown":
+            print(f"  {t.item.rel}: Moodle filters this resource's files, so what "
+                  "it serves, shown here, may not be what it holds")
     old.mkdir(exist_ok=True)
     new.mkdir(exist_ok=True)
     return changed

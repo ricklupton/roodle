@@ -63,6 +63,7 @@ class FakeMoodle:
         self.drafts = {}          # itemid -> {path: bytes}
         self.requests = []        # (method, path, action) of each request
         self.next_item = 900
+        self.store = {}           # object store: path -> bytes
 
     def add(self, cmid, name, files=None, **kw):
         self.resources[cmid] = Resource(cmid, name, 5000 + cmid, dict(files or {}), **kw)
@@ -81,6 +82,10 @@ class FakeMoodle:
                 "application/x-www-form-urlencoded"):
             form = {k: v[0] for k, v in parse_qs(request.content.decode()).items()}
         self.requests.append((request.method, path, query.get("action")))
+
+        if request.url.host == "store.example.com":
+            data = self.store.get(path)
+            return httpx.Response(404) if data is None else httpx.Response(200, content=data)
 
         if path.startswith("/login/"):
             return httpx.Response(200, text=page("Log in", logged_in=False))
@@ -145,6 +150,7 @@ class FakeMoodle:
         sha1 = hashlib.sha1(data).hexdigest()
         if r.object_store:
             key = f"{sha1[:2]}/{sha1[2:4]}/{sha1}" if r.object_store == "hash" else "file"
+            self.store[f"/bucket/{key}"] = data
             return httpx.Response(302, headers={"Location": (
                 f"https://store.example.com/bucket/{key}?X-Amz-Signature=abc")})
         if r.filtered:
