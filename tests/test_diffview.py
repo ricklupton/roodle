@@ -4,8 +4,8 @@ import shutil
 
 import pytest
 
-from roodle.diffview import (collapse_katex, hide_blobs, hide_notebook_blobs, prepare, view,
-                             visible_text)
+from roodle.diffview import (collapse_katex, hide_blobs, hide_notebook_blobs, notebook_text,
+                             prepare, view, visible_text)
 
 PNG = base64.b64encode(b"\x89PNG" + bytes(range(256)) * 40).decode()
 FONT = base64.b64encode(b"wOF2" + bytes(range(256)) * 4).decode()
@@ -178,3 +178,54 @@ def test_hide_notebook_blobs(tmp_path):
     p.write_text(text)
     view(p, "code")
     assert p.read_text() == out
+
+
+def notebook(count=1, words="Some words", value="0.25"):
+    return json.dumps({"nbformat": 4, "nbformat_minor": 5, "metadata": {"kernelspec": {}},
+                       "cells": [
+        {"cell_type": "markdown", "id": "a1", "metadata": {},
+         "source": ["# Sampling\n", "\n", f"{words}, and $x^2$.\n", "![a](attachment:a.png)"],
+         "attachments": {"a.png": {"image/png": FONT}}},
+        {"cell_type": "code", "id": "b2", "execution_count": count, "metadata": {},
+         "source": ["import pandas as pd\n", "print('hi')\n", "plot(x)"],
+         "outputs": [
+             {"output_type": "stream", "name": "stdout", "text": ["hi\n"]},
+             {"output_type": "display_data", "metadata": {}, "data": {
+                 "image/png": PNG + "\n", "text/plain": ["<Figure size 640x480 with 1 Axes>"]}},
+             {"output_type": "execute_result", "execution_count": count, "metadata": {},
+              "data": {"text/html": ["<table><tr><th>p</th></tr>",
+                                     f"<tr><td>{value}</td></tr></table>"],
+                       "text/plain": ["   p\n", f"0  {value}"]}},
+             {"output_type": "error", "ename": "ValueError", "evalue": "bad",
+              "traceback": ["\x1b[0;31mValueError\x1b[0m: bad"]}]},
+        {"cell_type": "code", "execution_count": None, "metadata": {}, "source": [],
+         "outputs": []}]}, indent=1)
+
+
+def test_notebook_text():
+    text = notebook_text(notebook())
+    assert text == (
+        "## markdown\n# Sampling\n\nSome words, and $x^2$.\n![a](attachment:a.png)\n"
+        "[attachment a.png: image/png: 1 KB, sha1 " + text.split("1 KB, sha1 ")[1][:7] + "]\n"
+        "\n## code\nimport pandas as pd\nprint('hi')\nplot(x)\n"
+        "[stdout]\nhi\n"
+        "[output]\n[image/png: 10 KB, sha1 " + text.split("10 KB, sha1 ")[1][:7] + "]\n"
+        "[output]\np\n0.25\n"
+        "[error]\nValueError: bad\n"
+        "\n## code\n")
+    assert notebook_text(notebook(count=7)) == text          # re-run: the same
+    assert notebook_text(notebook(value="0.3")) != text
+    assert notebook_text('{"not": "a notebook"}') is None
+    assert notebook_text("not json") is None
+
+
+def test_notebook_text_view(tmp_path):
+    old, new = tmp_path / "old", tmp_path / "new"
+    for root, count, words in ((old, 1, "Some words"), (new, 9, "Some words")):
+        root.mkdir()
+        (root / "n.ipynb").write_text(notebook(count=count, words=words))
+    assert prepare(old, new, "text") == ["n.ipynb"]   # differs only in the run
+    (old / "n.ipynb").write_text(notebook(words="Old words"))
+    (new / "n.ipynb").write_text(notebook(words="New words"))
+    assert prepare(old, new, "text") == []
+    assert (new / "n.ipynb").read_text().startswith("## markdown\n# Sampling\n\nNew words")

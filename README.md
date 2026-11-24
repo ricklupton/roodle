@@ -42,7 +42,7 @@ roodle publish --force lecture-04 upload them even if Moodle holds the same
 roodle publish --dry-run          only list what would be uploaded
 roodle publish --diff             show how each upload differs from Moodle, then ask
 roodle publish -n --diff          ...and only show it
-roodle publish -n --text          ...only the visible text of each page (or PDF)
+roodle publish -n --text          ...only the visible text of each page (or notebook, PDF)
 roodle publish --check [FILE...]  only check the names and the login (before a build, say)
 roodle resources                  list the File resources
 ```
@@ -70,8 +70,10 @@ rendered in advance as its TeX (`<span class="katex">[KaTeX: x^2]</span>`);
 the text of each page, one paragraph, heading or list item per line, a blank
 line before each slide, each formula as its TeX between `$`s (the same whether
 the page has the TeX or KaTeX's rendering of it), and a line for each image
-(its alt text and hash). PDFs are compared as text too, if `pdftotext` (from
-poppler) is installed.
+(its alt text and hash). For a Jupyter notebook it is each cell's source and
+what its outputs show (an image as a line, an HTML table as its text), without
+the execution counts and metadata that change on every run. PDFs are compared
+as text too, if `pdftotext` (from poppler) is installed.
 
 For a directory, only the files in the build are compared: any others that
 Moodle holds there aren't shown, though the upload deletes them.

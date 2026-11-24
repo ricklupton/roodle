@@ -10,11 +10,14 @@ which still change when the blob does.  Maths that KaTeX has rendered in
 advance is a screenful of markup per symbol: `collapse_katex` replaces it
 with its TeX.  `visible_text` goes further, and keeps only what a reader
 sees: the text, one block (paragraph, heading, list item...) per line, each
-formula as its TeX, and a line for each image.  `pdf_text` does the same for
-a PDF, with pdftotext.
+formula as its TeX, and a line for each image.  `notebook_text` does the
+same for a Jupyter notebook: each cell's source, and what its outputs show.
+`pdf_text` does the same for a PDF, with pdftotext.
 """
 
+import base64 as b64
 import hashlib
+import json
 import re
 import shutil
 import subprocess
@@ -217,6 +220,80 @@ def visible_text(html):
     return "\n".join(lines) + "\n"
 
 
+ANSI = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def joined(value):
+    """A notebook's multi-line string: a string, or a list of lines."""
+    return "".join(value) if isinstance(value, list) else str(value or "")
+
+
+def notebook_text(text):
+    """What a reader sees of a Jupyter notebook, as text: for each cell, a
+    `## code` (or markdown, raw) line, its source, and what each output
+    shows, under `[output]` (or `[stdout]`, `[stderr]`, `[error]`): an image
+    as a line with its type, size and hash, HTML as its visible text (see
+    `visible_text`), or else Markdown, LaTeX or plain text.  Execution
+    counts, ids and metadata, which change on every run, are left out.
+
+    None if `text` isn't a notebook."""
+    try:
+        cells = json.loads(text).get("cells")
+    except (ValueError, AttributeError):
+        return None
+    if not isinstance(cells, list):
+        return None
+    lines = []
+
+    def block(label, body):
+        body = ANSI.sub("", body).rstrip("\n")
+        if body.strip():
+            lines.append(label)
+            lines.extend(body.split("\n"))
+
+    def blob(mime, data):
+        data = joined(data).replace("\n", "")
+        return f"[{mime}: {blob_summary(data)[1:-1]}]"
+
+    for cell in cells:
+        if not isinstance(cell, dict):
+            continue
+        if lines:
+            lines.append("")
+        lines.append(f"## {cell.get('cell_type', 'cell')}")
+        source = joined(cell.get("source")).rstrip("\n")
+        if source:
+            lines.extend(source.split("\n"))
+        for name, bundle in sorted((cell.get("attachments") or {}).items()):
+            for mime, data in sorted(bundle.items()):
+                lines.append(f"[attachment {name}: {blob(mime, data)[1:]}")
+        for out in cell.get("outputs") or []:
+            kind = out.get("output_type")
+            if kind == "stream":
+                block(f"[{out.get('name', 'stream')}]", joined(out.get("text")))
+            elif kind == "error":
+                block("[error]", f"{out.get('ename', '')}: {out.get('evalue', '')}")
+            elif kind in ("execute_result", "display_data"):
+                data = out.get("data") or {}
+                shown = [blob(mime, value) for mime, value in sorted(data.items())
+                         if mime.startswith("image/") and mime != "image/svg+xml"]
+                if "image/svg+xml" in data:
+                    shown.append(blob("image/svg+xml", b64.b64encode(
+                        joined(data["image/svg+xml"]).encode()).decode()))
+                if "text/html" in data:
+                    shown.append(visible_text(joined(data["text/html"])))
+                elif "text/markdown" in data:
+                    shown.append(joined(data["text/markdown"]))
+                elif "text/latex" in data:
+                    shown.append(joined(data["text/latex"]))
+                elif "text/plain" in data and not shown:
+                    shown.append(joined(data["text/plain"]))
+                elif not shown:
+                    shown.append(f"[{', '.join(sorted(data)) or 'nothing'}]")
+                block("[output]", "\n".join(s.rstrip("\n") for s in shown))
+    return "\n".join(lines) + "\n"
+
+
 def pdf_text(path):
     """The text of a PDF, laid out as on the page, or None without
     pdftotext (from poppler) to read it."""
@@ -238,8 +315,8 @@ def as_text(data):
 
 def view(path, mode):
     """Rewrite the file at `path` as `mode` shows it: "raw" leaves it be,
-    "code" hides its blobs, "text" keeps only its visible text (for HTML
-    and, with pdftotext, PDF; other files as for "code")."""
+    "code" hides its blobs, "text" keeps only its visible text (for HTML,
+    notebooks and, with pdftotext, PDF; other files as for "code")."""
     if mode == "raw":
         return
     if mode == "text" and path.suffix.lower() == ".pdf":
@@ -254,6 +331,11 @@ def view(path, mode):
         path.write_text(visible_text(text), encoding="utf-8")
         return
     if path.suffix.lower() == ".ipynb":
+        if mode == "text":
+            shown = notebook_text(text)
+            if shown is not None:
+                path.write_text(shown, encoding="utf-8")
+                return
         text = hide_notebook_blobs(text)
     path.write_text(hide_blobs(collapse_katex(text)), encoding="utf-8")
 
