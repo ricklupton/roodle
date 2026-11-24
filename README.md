@@ -36,7 +36,7 @@ Paths are relative to the config file. Then:
 
 ```
 roodle publish                    upload whatever differs from what Moodle holds
-roodle publish lecture-04.html    upload just these, changed or not
+roodle publish lecture-04.html    upload just these, changed or not (with --diff, only if changed)
 roodle publish lecture-04         ...every file with that stem (.html and .pdf)
 roodle publish --dry-run          only list what would be uploaded
 roodle publish --diff             show how each upload differs from Moodle, then ask

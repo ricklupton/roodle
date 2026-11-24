@@ -402,3 +402,17 @@ def test_publish_text_diff(fake, project, run):
     assert blob not in out
     status, out = run("publish", "--raw", "-n", "lecture-01.html")
     assert blob in out
+
+
+def test_publish_diff_of_an_unchanged_named_file(fake, project, run):
+    set_up_moodle(fake, project)
+    status, out = run("publish", "--diff", "lecture-01.pdf")     # asks nothing
+    assert status == 0, out
+    assert "What Moodle holds now:\n  build/slides/lecture-01.pdf: no record" in out
+    assert out.endswith("\nMoodle is up to date: 1 resource holds the same as the build.\n")
+    assert "Fetching" not in out
+
+    status, out = run("publish", "-n", "--diff", "lecture-01")
+    assert ("Moodle holds the same as the build already, so not uploading: "
+            "build/slides/lecture-01.pdf\n") in out
+    assert "Would upload:\n  build/slides/lecture-01.html\n" in out

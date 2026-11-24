@@ -115,11 +115,20 @@ def publish(args):
               "file content' on for them?")
     failed_matches = 1 if only is not None and p.unmatched else 0
 
-    pending = p.pending(force=args.force or only is not None)
+    # Files named are uploaded changed or not -- unless the point is to see
+    # what changed (--diff), when an unchanged one has nothing to show.
+    pending = p.pending(force=args.force or only is not None and not show_diff)
+    if only is not None and show_diff and not args.force and p.unchanged:
+        if pending:
+            print("Moodle holds the same as the build already, so not uploading: "
+                  + ", ".join(t.item.rel for t in p.unchanged))
+        else:
+            history(p.unchanged, record)
     if not pending:
         if p.unchanged:
-            print(f"Moodle is up to date: {plural(len(p.unchanged), 'resource')} "
-                  "hold the same as the build.")
+            n = len(p.unchanged)
+            print(f"\nMoodle is up to date: {plural(n, 'resource')} "
+                  f"{'holds' if n == 1 else 'hold'} the same as the build.")
         return failed_matches
     if args.dry_run:
         print("\nWould upload" + ("" if only else f" ({len(p.unchanged)} unchanged)") + ":")
