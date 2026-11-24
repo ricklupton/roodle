@@ -59,14 +59,17 @@ export ROODLE_DIFF=meld
 export ROODLE_DIFF="emacsclient --eval '(diff \"{old}\" \"{new}\" \"-ruN\")'"
 ```
 
-Self-contained HTML carries its images, fonts and scripts inside it as base64
+Self-contained HTML carries its images, fonts, styles and scripts inside it as
 `data:` URIs. `--diff` shows each of those as its size and a short hash
 (`data:image/png;base64,[48 KB, sha1 3f2a9c1]`), so a changed image is one
-changed line and an unchanged one isn't shown at all; `--raw` shows the files
-as they are. `--text` compares only what a reader sees: the text of each page,
-one paragraph, heading or list item per line, a blank line before each slide,
-and a line for each image (its alt text and hash). PDFs are compared as text
-too, if `pdftotext` (from poppler) is installed.
+changed line and an unchanged one isn't shown at all, and maths that KaTeX has
+rendered in advance as its TeX (`<span class="katex">[KaTeX: x^2]</span>`);
+`--raw` shows the files as they are. `--text` compares only what a reader sees:
+the text of each page, one paragraph, heading or list item per line, a blank
+line before each slide, each formula as its TeX between `$`s (the same whether
+the page has the TeX or KaTeX's rendering of it), and a line for each image
+(its alt text and hash). PDFs are compared as text too, if `pdftotext` (from
+poppler) is installed.
 
 For a directory, only the files in the build are compared: any others that
 Moodle holds there aren't shown, though the upload deletes them.

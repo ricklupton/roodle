@@ -3,7 +3,7 @@ import shutil
 
 import pytest
 
-from roodle.diffview import hide_blobs, prepare, view, visible_text
+from roodle.diffview import collapse_katex, hide_blobs, prepare, view, visible_text
 
 PNG = base64.b64encode(b"\x89PNG" + bytes(range(256)) * 40).decode()
 FONT = base64.b64encode(b"wOF2" + bytes(range(256)) * 4).decode()
@@ -101,3 +101,54 @@ def test_pdf_text(tmp_path):
     (tmp_path / "a.pdf").write_bytes(tiny_pdf("Sheet one"))
     view(tmp_path / "a.pdf", "text")
     assert "Sheet one" in (tmp_path / "a.pdf").read_text()
+
+
+# What pandoc writes for KaTeX to render in the browser, and what KaTeX
+# renders in advance (as in Quarto, pre-rendered).
+RAW_MATH = ('<p>Each value of <span class="math inline">X</span>, and</p>'
+            '<p><span class="math display">\\sum_x p(x) = 1</span></p>')
+KATEX_X = (
+    '<span class="katex"><span class="katex-mathml"><math xmlns="http://www.w3.org/1998/'
+    'Math/MathML"><semantics><mrow><mi>X</mi></mrow><annotation encoding="application/'
+    'x-tex">X</annotation></semantics></math></span><span class="katex-html" aria-hidden='
+    '"true"><span class="base"><span class="strut" style="height:0.6833em;"></span><span '
+    'class="mord mathnormal" style="margin-right:0.07847em;">X</span></span></span></span>')
+KATEX_SUM = (
+    '<span class="katex-display"><span class="katex"><span class="katex-mathml"><math '
+    'xmlns="http://www.w3.org/1998/Math/MathML" display="block"><semantics><mrow><msub>'
+    '<mo>∑</mo><mi>x</mi></msub><mi>p</mi><mo>(</mo><mi>x</mi><mo>)</mo><mo>=</mo><mn>1'
+    '</mn></mrow><annotation encoding="application/x-tex">\\sum_x p(x) = 1</annotation>'
+    '</semantics></math></span><span class="katex-html" aria-hidden="true"><span class='
+    '"base"><span class="mop">∑</span></span></span></span></span>')
+RENDERED_MATH = (f'<p>Each value of <span class="math inline">{KATEX_X}</span>, and</p>'
+                 f'<p><span class="math display">{KATEX_SUM}</span></p>')
+
+
+def test_visible_text_of_maths():
+    assert visible_text(RAW_MATH) == "Each value of $X$, and\n$$\\sum_x p(x) = 1$$\n"
+    assert visible_text(RENDERED_MATH) == visible_text(RAW_MATH)
+    mathjax = RAW_MATH.replace(">X<", ">\\(X\\)<").replace(
+        "\\sum_x p(x) = 1", "\\[\\sum_x p(x) = 1\\]")
+    assert visible_text(mathjax) == visible_text(RAW_MATH)
+
+
+def test_collapse_katex():
+    out = collapse_katex(RENDERED_MATH + "<span>after</span>")
+    assert out == ('<p>Each value of <span class="math inline"><span class="katex">'
+                   '[KaTeX: X]</span></span>, and</p><p><span class="math display">'
+                   '<span class="katex-display">[KaTeX: \\sum_x p(x) = 1]</span></span></p>'
+                   "<span>after</span>")
+
+
+def test_hide_url_encoded_blobs():
+    css = "%3Aroot%2C%5Bdata%2Dbs%2Dtheme%3Dlight%5D%20%7B" * 20
+    html = (f'<link href="data:text/css,{css}" rel="stylesheet">\n'
+            f"<img src='data:image/svg+xml,%3Csvg xmlns=%22a%22%3E{css}%3C/svg%3E'>\n"
+            f"a {{ background: url(data:image/svg+xml,{css}) }}\n"
+            '<img src="data:image/svg+xml,%3Csvg%3E%3C/svg%3E">\n')
+    out = hide_blobs(html)
+    assert css not in out
+    assert out.startswith('<link href="data:text/css,[580 bytes, sha1 ')
+    assert "\" rel=\"stylesheet\">\n<img src='data:image/svg+xml,[" in out
+    assert "url(data:image/svg+xml,[" in out and "]) }" in out
+    assert '<img src="data:image/svg+xml,%3Csvg%3E%3C/svg%3E">' in out   # short: kept
