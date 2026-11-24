@@ -41,6 +41,7 @@ roodle publish lecture-04         ...every file with that stem (.html and .pdf)
 roodle publish --dry-run          only list what would be uploaded
 roodle publish --diff             show how each upload differs from Moodle, then ask
 roodle publish -n --diff          ...and only show it
+roodle publish -n --text          ...only the visible text of each page (or PDF)
 roodle publish --check [FILE...]  only check the names and the login (before a build, say)
 roodle resources                  list the File resources
 ```
@@ -58,8 +59,36 @@ export ROODLE_DIFF=meld
 export ROODLE_DIFF="emacsclient --eval '(diff \"{old}\" \"{new}\" \"-ruN\")'"
 ```
 
+Self-contained HTML carries its images, fonts and scripts inside it as base64
+`data:` URIs. `--diff` shows each of those as its size and a short hash
+(`data:image/png;base64,[48 KB, sha1 3f2a9c1]`), so a changed image is one
+changed line and an unchanged one isn't shown at all; `--raw` shows the files
+as they are. `--text` compares only what a reader sees: the text of each page,
+one paragraph, heading or list item per line, a blank line before each slide,
+and a line for each image (its alt text and hash). PDFs are compared as text
+too, if `pdftotext` (from poppler) is installed.
+
 For a directory, only the files in the build are compared: any others that
 Moodle holds there aren't shown, though the upload deletes them.
+
+### What was uploaded, from which commit
+
+Each upload is noted in `moodle-published.json`, beside the config file: the
+file's content hash and the git commit checked out when it was uploaded
+(and whether there were uncommitted changes). Commit it with your sources, so
+that it travels between machines and the people who publish.
+
+`--diff` then starts by saying, for each file, whether Moodle still holds what
+roodle last uploaded, when that was, and the commits since:
+
+```
+What Moodle holds now:
+  build/slides/lecture-04.html: uploaded 12 Nov 2026 14:03
+    built from a1b2c3d; 2 commits since:
+      e4f5a6b Fix typo in example
+      9c8d7e6 Add exercise on regression
+    (git diff a1b2c3d shows the changes to the sources)
+```
 
 roodle compares files to the version already on Moodle (via its ETag) to avoid
 unnecessary uploads of unchanged files. Each upload does what you would do in

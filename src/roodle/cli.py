@@ -21,8 +21,12 @@ from pathlib import Path
 import httpx
 
 from .client import Moodle
+from .diffview import prepare
 from .errors import MoodleError, TooLarge
+from .files import sha1_file
 from .publish import DEFAULT_CONFIG, Config, ConfigError, match, plan
+from .record import Record, commits_since, git_state
+from .resource import local_files
 
 try:
     import termios
@@ -83,6 +87,12 @@ def publish(args):
 
     items, _ = config.items()
     only = config.select(args.files, items) if args.files else None
+    try:
+        record = Record(config.root)
+    except ValueError as e:
+        raise ConfigError(str(e)) from None
+    mode = "text" if args.text else "raw" if args.raw else "code"
+    show_diff = args.diff or args.text or args.raw
     moodle, course = connect(config)
     moodle.wait_for_login(course.url, ask=ask)
 
@@ -114,12 +124,12 @@ def publish(args):
     if args.dry_run:
         print("\nWould upload" + ("" if only else f" ({len(p.unchanged)} unchanged)") + ":")
         list_targets(pending)
-        if args.diff:
-            diff(pending)
+        if show_diff:
+            diff(pending, mode, record)
         return failed_matches
 
-    confirm(pending, args.diff)
-    failed = upload(moodle, course, pending)
+    confirm(pending, mode if show_diff else None, record)
+    failed = upload(moodle, course, pending, record)
     if failed:
         print(f"\nNot uploaded: {', '.join(failed)}")
         return 1
@@ -154,19 +164,19 @@ def list_targets(targets):
               + ("" if t.held_ok else f"   <- holds {t.held or 'no file'} now"))
 
 
-def confirm(pending, show_diff=False):
+def confirm(pending, mode=None, record=None):
     """List where each file is going, by the resource's name on Moodle and
     whether students can see it, and ask first if any resource holds a file
     of a different name now -- the sign of a mistyped cmid -- or after
     showing the diff."""
     print("\nTo upload:")
     list_targets(pending)
-    if show_diff:
-        diff(pending)
+    if mode:
+        diff(pending, mode, record)
     if not all(t.held_ok for t in pending):
         question = ("Some of these resources hold a file of another name now: check "
                     "they are the right ones. Upload? [Y/n] ")
-    elif show_diff:
+    elif mode:
         question = "Upload? [Y/n] "
     else:
         question = None
@@ -175,10 +185,11 @@ def confirm(pending, show_diff=False):
     print()
 
 
-def diff(pending):
+def diff(pending, mode="code", record=None):
     """Show how each upload would change what Moodle holds.
 
-    Moodle's copies of the files that differ, and the local ones, are put in
+    First, from `record`, when roodle uploaded what Moodle holds, from which
+    commit, and the commits since.  Then the files.  Moodle's copies of the files that differ, and the local ones, are put in
     a temporary directory as moodle/ and local/, each under the item's path
     from the config file, and compared with `git diff --no-index` -- so
     git's pager, colours and diff settings apply -- or `diff -ruN` without
@@ -186,11 +197,25 @@ def diff(pending):
     two directories, or they replace {old} and {new} in it.  Its directory
     is kept, in case the command returns before it has read the files
     (`emacsclient`, say).
+
+    Before comparing them, the files are rewritten as `mode` shows them
+    (see `diffview.view`): "code" with base64 blobs replaced by their size
+    and hash, "text" as only their visible text, or "raw" as they are.
     """
+    if record is not None:
+        history(pending, record)
     tmp = Path(tempfile.mkdtemp(prefix="roodle-diff-"))
     try:
-        if not gather_changes(pending, tmp / "moodle", tmp / "local"):
-            print("  No differences: Moodle holds the same files.")
+        old, new = tmp / "moodle", tmp / "local"
+        changed = gather_changes(pending, old, new)
+        if changed:
+            same = prepare(old, new, mode)
+            for rel in same:
+                print(f"  {rel}: differs only in "
+                      + ("what isn't visible" if mode == "text" else "embedded files"))
+            changed -= len(same)
+        if not changed:
+            print("  No differences" + ("" if mode == "raw" else " to show") + ".")
         elif not run_diff(tmp, os.environ.get("ROODLE_DIFF")):
             return  # keep the files
     except BaseException:
@@ -215,6 +240,44 @@ def gather_changes(pending, old, new):
     old.mkdir(exist_ok=True)
     new.mkdir(exist_ok=True)
     return changed
+
+
+def history(pending, record, shown=10):
+    """For each target, when roodle uploaded what Moodle holds and from
+    which commit, by the record -- grouped by commit, with the commits
+    since."""
+    print("\nWhat Moodle holds now:")
+    groups = {}
+    for t in pending:
+        u = record.get(t.item.rel)
+        if u is None:
+            print(f"  {t.item.rel}: no record of roodle uploading it")
+            continue
+        holds = u.cmid == t.resource.cmid and t.resource.holds(u.file, u.sha1)
+        if holds is False:
+            print(f"  {t.item.rel}: not what roodle last uploaded "
+                  f"({u.when}, from {u.source})")
+            continue
+        groups.setdefault((u.commit, u.dirty), []).append((t, u, holds))
+    for (commit, dirty), members in groups.items():
+        for t, u, holds in members:
+            print(f"  {t.item.rel}: uploaded {u.when}"
+                  + ("" if holds else " (probably: Moodle filters it, so can't say)"))
+        u = members[0][1]
+        if commit is None:
+            print("    built outside git")
+            continue
+        since = commits_since(record.root, commit)
+        print(f"    built from {u.source}" + (
+            "; git doesn't know that commit" if since is None else
+            "; no commits since" if not since else
+            f"; {plural(len(since), 'commit')} since:"))
+        for line in (since or [])[:shown]:
+            print(f"      {line}")
+        if since and len(since) > shown:
+            print(f"      ...and {len(since) - shown} more")
+        if since or dirty:
+            print(f"    (git diff {commit[:7]} shows the changes to the sources)")
 
 
 def run_diff(tmp, tool):
@@ -243,10 +306,11 @@ def run_diff(tmp, tool):
     return False
 
 
-def upload(moodle, course, pending):
-    """Upload each target, asking what to do about any failure.  Returns
-    the paths of those not uploaded."""
+def upload(moodle, course, pending, record=None):
+    """Upload each target, asking what to do about any failure, and note
+    each upload in `record`.  Returns the paths of those not uploaded."""
     failed = []
+    commit, dirty = git_state(record.root) if record is not None else (None, False)
     for t in pending:
         print(f"  uploading {t.item.rel} ({size(t.item.path)})")
         while True:
@@ -265,8 +329,26 @@ def upload(moodle, course, pending):
                 else:
                     moodle.wait_for_login(course.url, ask=ask)
                     continue
+            else:
+                if record is not None:
+                    note_upload(record, t, commit, dirty)
             break
     return failed
+
+
+def note_upload(record, target, commit, dirty):
+    """Add an upload to the record: the main file Moodle now serves, and
+    its content hash."""
+    try:
+        held = target.resource.held_file()
+    except Exception as e:  # the upload is done: don't fail it for this
+        print(f"    (not recorded: {e})")
+        return
+    local = {name: p for p, name in local_files(target.item.path)}
+    if held is None or held.name not in local:
+        return
+    record.add(target.item.rel, target.resource.cmid, held.name,
+               sha1_file(local[held.name]), commit, dirty)
 
 
 # -------------------------------------------------------------- resources
@@ -324,7 +406,14 @@ def main(argv=None):
                    help="only list what would be uploaded")
     p.add_argument("-d", "--diff", action="store_true",
                    help="show how each upload differs from what Moodle holds, "
-                        "with git diff or $ROODLE_DIFF, and ask before uploading")
+                        "with git diff or $ROODLE_DIFF, and ask before uploading; "
+                        "embedded images, fonts and scripts show as their size and hash")
+    view = p.add_mutually_exclusive_group()
+    view.add_argument("--text", action="store_true",
+                      help="as --diff, comparing only the visible text of HTML "
+                           "(and of PDFs, with pdftotext)")
+    view.add_argument("--raw", action="store_true",
+                      help="as --diff, comparing the files as they are")
     p.add_argument("--force", action="store_true",
                    help="upload everything, changed or not")
     p.add_argument("--check", action="store_true",

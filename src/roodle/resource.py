@@ -137,6 +137,15 @@ class FileResource:
             status = "same"
         return Comparison(status, held.name)
 
+    def holds(self, name, sha1):
+        """Whether the resource holds a file `name` with content hash `sha1`:
+        True, False, or None if Moodle doesn't say (see `serves_same`)."""
+        held = self.held_file()
+        if held is None:
+            return False
+        return serves_same(self.moodle, pluginfile_url(
+            self.moodle, held.context_id, "mod_resource", "content", 0, name), sha1)
+
     def fetch_changes(self, path, old, new, workers=8):
         """Copy each file that replacing the resource's content with `path`
         would change into two directories, under its name in the resource:

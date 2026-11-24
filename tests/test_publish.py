@@ -1,4 +1,8 @@
+import hashlib
+import json
+import re
 import shutil
+import subprocess
 
 import pytest
 
@@ -314,3 +318,87 @@ def test_visibility_as_moodle_shows_it(fake, project, run):
     fake.resources[11].stealth = True
     status, out = run("publish", "--dry-run")
     assert "cmid 11, available but not shown on course page\n" in out
+
+
+# ------------------------------------------------------- upload record
+
+def git(project, *args):
+    return subprocess.run(["git", "-c", "user.name=T", "-c", "user.email=t@example.com",
+                           "-C", str(project), *args],
+                          check=True, capture_output=True, text=True).stdout.strip()
+
+
+def commit_all(project, message):
+    git(project, "add", "-A")
+    git(project, "commit", "-q", "-m", message)
+    return git(project, "rev-parse", "HEAD")
+
+
+@pytest.fixture
+def repo(project, run):     # after `run`, for its git settings
+    git(project, "init", "-q")
+    (project / ".gitignore").write_text("build/\n")
+    write(project, {"slides/lecture-01.qmd": "# Lecture 1"})
+    return commit_all(project, "Start")
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_publish_records_each_upload(fake, project, run, repo):
+    set_up_moodle(fake, project)
+    status, out = run("publish")
+    assert status == 0 and "Uploaded 1." in out
+    entry = json.loads((project / "moodle-published.json").read_text())[
+        "build/slides/lecture-01.html"]
+    assert entry["cmid"] == 11 and entry["file"] == "lecture-01.html"
+    assert entry["sha1"] == hashlib.sha1(b"deck 1").hexdigest()
+    assert (entry["commit"], entry["dirty"]) == (repo, False)
+
+    commit_all(project, "Record the upload")      # the record's changes don't count
+    write(project, {"slides/lecture-01.qmd": "# Lecture 1, again"})
+    status, out = run("publish", "lecture-01.html")
+    entry = json.loads((project / "moodle-published.json").read_text())[
+        "build/slides/lecture-01.html"]
+    assert entry["dirty"] is True
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_publish_diff_says_where_moodle_copies_came_from(fake, project, run, repo):
+    set_up_moodle(fake, project)
+    run("publish")
+    write(project, {"slides/lecture-01.qmd": "# Lecture 1, fixed",
+                    "build/slides/lecture-01.html": "deck 1, fixed",
+                    "build/book/index.html": "home 2"})
+    fix = commit_all(project, "Fix typo")
+    status, out = run("publish", "-n", "--diff")
+    assert status == 0, out
+    assert "What Moodle holds now:\n  build/book: no record of roodle uploading it\n" in out
+    assert re.search(r"  build/slides/lecture-01.html: uploaded \d+ \w+ \d{4} \d\d:\d\d\n"
+                     rf"    built from {repo[:7]}; 1 commit since:\n"
+                     rf"      {fix[:7]} Fix typo\n"
+                     rf"    \(git diff {repo[:7]} shows the changes to the sources\)\n", out)
+
+    fake.resources[11].files = {"lecture-01.html": b"by hand"}
+    status, out = run("publish", "-n", "--diff", "lecture-01.html")
+    assert "build/slides/lecture-01.html: not what roodle last uploaded (" in out
+
+
+@pytest.mark.skipif(not shutil.which("git"), reason="needs git")
+def test_publish_text_diff(fake, project, run):
+    set_up_moodle(fake, project)
+    blob = "QUJD" * 100
+    fake.resources[11].files = {"lecture-01.html": (
+        f'<section><h2>Model</h2><p>Old point</p><img src="data:image/png;base64,{blob}">'
+        "</section>").encode()}
+    write(project, {"build/slides/lecture-01.html":
+                    f'<section><h2>Model</h2><p>New point</p><img src="data:image/png;base64,{blob}">'
+                    "<script>lots()</script></section>"})
+    status, out = run("publish", "--text", "-n", "lecture-01.html")
+    assert status == 0, out
+    assert " Model\n-Old point\n+New point\n [image: [300 bytes, sha1 " in out
+    assert blob not in out and "lots()" not in out
+
+    status, out = run("publish", "--diff", "-n", "lecture-01.html")
+    assert "-<section><h2>Model</h2><p>Old point</p><img src=\"data:image/png;base64,[300 bytes" in out
+    assert blob not in out
+    status, out = run("publish", "--raw", "-n", "lecture-01.html")
+    assert blob in out
