@@ -36,8 +36,9 @@ Paths are relative to the config file. Then:
 
 ```
 roodle publish                    upload whatever differs from what Moodle holds
-roodle publish lecture-04.html    upload just these, changed or not (with --diff, only if changed)
+roodle publish lecture-04.html    upload just these, if they differ from what Moodle holds
 roodle publish lecture-04         ...every file with that stem (.html and .pdf)
+roodle publish --force lecture-04 upload them even if Moodle holds the same
 roodle publish --dry-run          only list what would be uploaded
 roodle publish --diff             show how each upload differs from Moodle, then ask
 roodle publish -n --diff          ...and only show it
@@ -60,7 +61,8 @@ export ROODLE_DIFF="emacsclient --eval '(diff \"{old}\" \"{new}\" \"-ruN\")'"
 ```
 
 Self-contained HTML carries its images, fonts, styles and scripts inside it as
-`data:` URIs. `--diff` shows each of those as its size and a short hash
+`data:` URIs, and a Jupyter notebook its outputs' images as base64 strings.
+`--diff` shows each of those as its size and a short hash
 (`data:image/png;base64,[48 KB, sha1 3f2a9c1]`), so a changed image is one
 changed line and an unchanged one isn't shown at all, and maths that KaTeX has
 rendered in advance as its TeX (`<span class="katex">[KaTeX: x^2]</span>`);

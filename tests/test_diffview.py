@@ -1,9 +1,11 @@
 import base64
+import json
 import shutil
 
 import pytest
 
-from roodle.diffview import collapse_katex, hide_blobs, prepare, view, visible_text
+from roodle.diffview import (collapse_katex, hide_blobs, hide_notebook_blobs, prepare, view,
+                             visible_text)
 
 PNG = base64.b64encode(b"\x89PNG" + bytes(range(256)) * 40).decode()
 FONT = base64.b64encode(b"wOF2" + bytes(range(256)) * 4).decode()
@@ -152,3 +154,27 @@ def test_hide_url_encoded_blobs():
     assert "\" rel=\"stylesheet\">\n<img src='data:image/svg+xml,[" in out
     assert "url(data:image/svg+xml,[" in out and "]) }" in out
     assert '<img src="data:image/svg+xml,%3Csvg%3E%3C/svg%3E">' in out   # short: kept
+
+
+def test_hide_notebook_blobs(tmp_path):
+    notebook = {"cells": [
+        {"cell_type": "code", "source": ["plot(x)\n", "A" * 80],
+         "outputs": [{"output_type": "display_data", "data": {
+             "image/png": PNG + "\n",
+             "image/jpeg": PNG[:76] + "\n" + PNG[76:200] + "\n",   # older, wrapped
+             "text/plain": ["<Figure size 640x480 with 1 Axes>"]}}]},
+        {"cell_type": "markdown", "source": ["![a](attachment:a.png)"],
+         "attachments": {"a.png": {"image/png": FONT}}}]}
+    text = json.dumps(notebook, indent=1)
+    out = hide_notebook_blobs(text)
+    assert PNG[:76] not in out and FONT not in out
+    assert '"image/png": "[10 KB, sha1 ' in out
+    assert '"image/jpeg": "[150 bytes, sha1 ' in out
+    assert '"A' + "A" * 79 + '"' in out              # source, not an output: kept
+    assert "<Figure size 640x480 with 1 Axes>" in out
+    json.loads(out)                                   # still JSON
+
+    p = tmp_path / "n.ipynb"
+    p.write_text(text)
+    view(p, "code")
+    assert p.read_text() == out

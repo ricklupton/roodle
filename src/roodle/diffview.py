@@ -40,6 +40,11 @@ TEX = re.compile(r'<annotation encoding="application/x-tex">(.*?)</annotation>',
 # What MathJax, or a page's own script, may put around TeX in the page.
 DELIMITERS = [("\\(", "\\)"), ("\\[", "\\]"), ("$$", "$$"), ("$", "$")]
 
+# In a Jupyter notebook, the base64 data of an output (or an attachment)
+# for a binary MIME type: "image/png": "iVBORw0KGgo...\n"
+NOTEBOOK_BLOB = re.compile(
+    r'(?P<key>"[\w.+-]+/[\w.+-]+"\s*:\s*)"(?P<data>(?:[A-Za-z0-9+/]|\\n){64,}=*(?:\\n)?)"')
+
 HTML = {".html", ".htm", ".xhtml"}
 
 # Elements whose content starts on a line of its own.
@@ -91,6 +96,15 @@ def hide_blobs(text):
         out += [text[pos:m.end()], blob_summary(text[m.end():end], base64=False)]
         pos = end
     return "".join(out) + text[pos:]
+
+
+def hide_notebook_blobs(text):
+    """A Jupyter notebook's text, with the base64 data of each output (or
+    attachment) replaced by its size and a short hash, still in quotes:
+    `"image/png": "[48 KB, sha1 3f2a9c1]"`."""
+    def replace(m):
+        return f'{m.group("key")}"{blob_summary(m.group("data").replace(chr(92) + "n", ""))}"'
+    return NOTEBOOK_BLOB.sub(replace, text)
 
 
 def collapse_katex(text):
@@ -238,8 +252,10 @@ def view(path, mode):
         return
     if mode == "text" and path.suffix.lower() in HTML:
         path.write_text(visible_text(text), encoding="utf-8")
-    else:
-        path.write_text(hide_blobs(collapse_katex(text)), encoding="utf-8")
+        return
+    if path.suffix.lower() == ".ipynb":
+        text = hide_notebook_blobs(text)
+    path.write_text(hide_blobs(collapse_katex(text)), encoding="utf-8")
 
 
 def prepare(old, new, mode):

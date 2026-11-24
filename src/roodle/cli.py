@@ -115,10 +115,8 @@ def publish(args):
               "file content' on for them?")
     failed_matches = 1 if only is not None and p.unmatched else 0
 
-    # Files named are uploaded changed or not -- unless the point is to see
-    # what changed (--diff), when an unchanged one has nothing to show.
-    pending = p.pending(force=args.force or only is not None and not show_diff)
-    if only is not None and show_diff and not args.force and p.unchanged:
+    pending = p.pending(force=args.force)
+    if only is not None and not args.force and p.unchanged:
         if pending:
             print("Moodle holds the same as the build already, so not uploading: "
                   + ", ".join(t.item.rel for t in p.unchanged))
@@ -409,7 +407,7 @@ def main(argv=None):
         description="Upload each built file the config lists to its File "
                     "resource, if it differs from what Moodle holds there.")
     p.add_argument("files", nargs="*", metavar="FILE",
-                   help="upload only these, changed or not: a path, a file "
+                   help="upload only these, if changed: a path, a file "
                         "name, or a file name without its extension")
     p.add_argument("-n", "--dry-run", action="store_true",
                    help="only list what would be uploaded")
@@ -424,7 +422,7 @@ def main(argv=None):
     view.add_argument("--raw", action="store_true",
                       help="as --diff, comparing the files as they are")
     p.add_argument("--force", action="store_true",
-                   help="upload everything, changed or not")
+                   help="upload everything (or every FILE), changed or not")
     p.add_argument("--check", action="store_true",
                    help="only check the FILE names and the login, e.g. before a build")
     p.set_defaults(func=publish)

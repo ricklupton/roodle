@@ -257,6 +257,13 @@ def test_publish_diff_of_nothing(fake, project, run):
 def test_publish_named_files(fake, project, run):
     set_up_moodle(fake, project)
     status, out = run("publish", "lecture-01")
+    assert status == 0 and "Uploaded 1." in out
+    assert ("Moodle holds the same as the build already, so not uploading: "
+            "build/slides/lecture-01.pdf\n") in out
+    status, out = run("publish", "lecture-01.html")
+    assert status == 0 and "Uploaded" not in out
+    assert out.endswith("\nMoodle is up to date: 1 resource holds the same as the build.\n")
+    status, out = run("publish", "--force", "lecture-01")
     assert status == 0 and "Uploaded 2." in out
     status, out = run("publish", "lecture-02.html")
     assert status == 1 and "no resource on Moodle yet" in out
@@ -354,7 +361,8 @@ def test_publish_records_each_upload(fake, project, run, repo):
     assert (entry["commit"], entry["dirty"]) == (repo, False)
 
     commit_all(project, "Record the upload")      # the record's changes don't count
-    write(project, {"slides/lecture-01.qmd": "# Lecture 1, again"})
+    write(project, {"slides/lecture-01.qmd": "# Lecture 1, again",
+                    "build/slides/lecture-01.html": "deck 1, again"})
     status, out = run("publish", "lecture-01.html")
     entry = json.loads((project / "moodle-published.json").read_text())[
         "build/slides/lecture-01.html"]
